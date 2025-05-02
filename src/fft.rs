@@ -55,7 +55,7 @@ pub fn ifft2(fft_img: &ArrayView2<Complex<f64>>) -> Array2<Complex<f64>> {
 //     println!("max_val: {}, min_val: {}", max_val, min_val);
 
 
-fn fft2shift(img: &ArrayView2<Complex<f64>>) -> Array2<Complex<f64>> {
+pub fn fft2shift(img: &ArrayView2<Complex<f64>>) -> Array2<Complex<f64>> {
     let (ny, nx) = img.dim();
     let mut shifted = Array2::zeros((ny, nx));
     let half_ny = ny / 2;
@@ -71,7 +71,7 @@ fn fft2shift(img: &ArrayView2<Complex<f64>>) -> Array2<Complex<f64>> {
     shifted
 }
 
-fn ifft2shift(img: &ArrayView2<Complex<f64>>) -> Array2<Complex<f64>> {
+pub fn ifft2shift(img: &ArrayView2<Complex<f64>>) -> Array2<Complex<f64>> {
     let (ny, nx) = img.dim();
     let mut shifted = Array2::zeros((ny, nx));
     let half_ny = ny / 2;

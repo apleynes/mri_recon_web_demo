@@ -46,6 +46,30 @@ async fn convert_image_input_to_base_64(input: Option<HtmlInputElement>) -> Resu
 }
 
 
+fn convert_data_url_to_image(data_url: &str) -> Result<image::DynamicImage, String> {
+    // Remove the data URL prefix (e.g., "data:image/png;base64,")
+    let parts: Vec<&str> = data_url.split(",").collect();
+    if parts.len() != 2 {
+        return Err("Invalid data URL format".to_string());
+    }
+    let base64_data = parts[1];
+
+    // Decode the Base64 data
+    let image_data = match base64::engine::general_purpose::STANDARD.decode(base64_data) {
+        Ok(data) => data,
+        Err(_) => return Err("Failed to decode base64 data".to_string()),
+    };
+
+    // Load the image from memory
+    let img = match image::load_from_memory(&image_data) {
+        Ok(image) => image,
+        Err(_) => return Err("Failed to load image from memory".to_string()),
+    };
+
+    Ok(img)
+}
+
+
 async fn process_image(input: Option<HtmlInputElement>, tgv_lam: f32) -> Result<(String, String), String> {
     let input = input.ok_or("No input element found")?;
     let files = input.files().ok_or("No files selected")?;
@@ -243,6 +267,7 @@ fn App() -> impl IntoView {
             let img = img.as_ndarray2();
             let complex_img: Array2<Complex<f64>> = img.map(|x| Complex::new(*x as f64, 0.0));
             let fft_vec = fft::fft2(&complex_img.view());
+            let fft_vec = fft::fft2shift(&fft_vec.view());
             let (v, offset) = fft_vec.into_raw_vec_and_offset();
             set_img_fft_vec.set(v);
 
@@ -263,7 +288,9 @@ fn App() -> impl IntoView {
             .get()
             .expect("canvas should be in the DOM");
             let image_string = canvas.to_data_url_with_type("image/png").expect("Failed to convert canvas to image");
-            let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
+            log!("image_string: {:?}", image_string);
+            // let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
+            let image = convert_data_url_to_image(&image_string).expect("Failed to convert data URL to image");
             let image_array: GrayImage = image.into_luma8();
             let mask = image_array.as_ndarray2();
             let mask = mask.map(|x| *x as f64);
@@ -283,7 +310,7 @@ fn App() -> impl IntoView {
                     masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
                 }
             }
-
+            let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
             let reconstructed_img = fft::ifft2(&masked_fft_img.view());
             // Convert to real
             let reconstructed_img = reconstructed_img.map(|x| x.re);
