@@ -1,0 +1,22 @@
+[package]
+name = "leptos_mri_recon"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+base64 = "0.22.1"
+console_error_panic_hook = "0.1.7"
+gloo-events = "0.2.0"
+html = "0.6.3"
+image = "0.25.6"
+js-sys = "0.3.77"
+leptos = { version = "0.7.8", features = ["csr"] }
+ndarray = "0.16.1"
+ndrustfft = "0.5.0"
+nshare = "0.10.0"
+num-complex = "0.4.6"
+rayon = "1.10.0"
+wasm-bindgen = "0.2.100"
+wasm-bindgen-futures = "0.4.50"
+web-sys = { version = "0.3.77", features = ["CanvasRenderingContext2d", "Document", "Element", "HtmlCanvasElement", "Window", "DomRect", "FileList", "File"] }
+

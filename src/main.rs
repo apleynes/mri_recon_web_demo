@@ -1,0 +1,287 @@
+use std::{fs::File, io::Cursor};
+
+use gloo_events::EventListener;
+use leptos::{html::{Canvas, Input}, prelude::*, task::spawn_local};
+use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{window, Blob, CanvasRenderingContext2d, Element, HtmlCanvasElement, HtmlInputElement, MouseEvent, Url};
+use image::{ImageReader, RgbImage, ImageFormat, GrayImage};
+use base64::{engine::general_purpose, Engine as _};
+use nshare::{IntoNdarray3, AsNdarray3};
+use ndarray::{Array2, Array3, s};
+mod fft;
+
+
+async fn convert_image_input_to_base_64(input: Option<HtmlInputElement>) -> Result<String, String> {
+    let input = input.ok_or("No input element found")?;
+    let files = input.files().ok_or("No files selected")?;
+    let file = files.get(0).ok_or("No file found")?;
+
+    // Read file as ArrayBuffer
+    let array_buffer_promise = file.array_buffer();
+    let array_buffer = wasm_bindgen_futures::JsFuture::from(array_buffer_promise)
+        .await
+        .map_err(|e| format!("Failed to read file: {:?}", e))?;
+
+    // Convert to Uint8Array and then to Vec<u8>
+    let uint8_array = js_sys::Uint8Array::new(&array_buffer);
+    let buffer_vec = uint8_array.to_vec();
+
+    // Decode the image
+    let img = image::load_from_memory(&buffer_vec)
+        .map_err(|e| format!("Failed to decode image: {:?}", e))?;
+    let img: RgbImage = img.into_rgb8();
+
+    // Convert original image to base64 for display
+    let mut original_buffer = Vec::new();
+    img.write_to(&mut Cursor::new(&mut original_buffer), ImageFormat::Png)
+        .map_err(|e| format!("Failed to encode original image: {:?}", e))?;
+    let original_base64 = general_purpose::STANDARD.encode(&original_buffer);
+    Ok(format!("data:image/png;base64,{}", original_base64))
+}
+
+
+async fn process_image(input: Option<HtmlInputElement>, tgv_lam: f32) -> Result<(String, String), String> {
+    let input = input.ok_or("No input element found")?;
+    let files = input.files().ok_or("No files selected")?;
+    let file = files.get(0).ok_or("No file found")?;
+
+    // Read file as ArrayBuffer
+    let array_buffer_promise = file.array_buffer();
+    let array_buffer = wasm_bindgen_futures::JsFuture::from(array_buffer_promise)
+        .await
+        .map_err(|e| format!("Failed to read file: {:?}", e))?;
+
+    // Convert to Uint8Array and then to Vec<u8>
+    let uint8_array = js_sys::Uint8Array::new(&array_buffer);
+    let buffer_vec = uint8_array.to_vec();
+
+    // Decode the image
+    let img = image::load_from_memory(&buffer_vec)
+        .map_err(|e| format!("Failed to decode image: {:?}", e))?;
+    let img: RgbImage = img.into_rgb8();
+
+    // Convert original image to base64 for display
+    let mut original_buffer = Vec::new();
+    img.write_to(&mut Cursor::new(&mut original_buffer), ImageFormat::Png)
+        .map_err(|e| format!("Failed to encode original image: {:?}", e))?;
+    let original_base64 = general_purpose::STANDARD.encode(&original_buffer);
+    let original_data_url = format!("data:image/png;base64,{}", original_base64);
+
+    // Process the image with TGV denoising
+    // let rgb_img: RgbImage = img.to_rgb8();
+    let img = img.as_ndarray3();
+    let img = img.permuted_axes([1, 2, 0]);
+    // println!("img shape is {:?}", img.shape());
+    // println!("img min is {:?}", img.into_iter().min());
+    // println!("img max is {:?}", img.into_iter().max());
+    let img: Array3<f32> = img.map(|x| *x as f32);
+    let grayscale_img: Array2<f32> = (&img.slice(s![.., .., 0]) + &img.slice(s![.., .., 1]) + &img.slice(s![.., .., 2])) / 3.0;
+
+    // println!("grayscale_img min is {:?}", (&grayscale_img).into_iter().reduce(|a, b| if a < b { a } else { b }));
+    // println!("grayscale_img max is {:?}", (&grayscale_img).into_iter().reduce(|a, b| if a > b { a } else { b }));
+
+    // let denoised_img = tgv::tgv_denoise(&grayscale_img.view(), tgv_lam, 2.0, 1.0, 0.125, 0.125, 300);
+    // // WebAssembly does not allow for parallelization directly using rayon. Needs special handling
+    // let denoised_img = denoised_img.map(|x| *x as u8);
+    // let denoised_img = GrayImage::from_raw(img.shape()[0] as u32, img.shape()[1] as u32, denoised_img.into_iter().collect()).unwrap();
+
+    // // Convert processed image to base64 for display
+    let mut processed_buffer = Vec::new();
+    GrayImage::from_raw(img.shape()[0] as u32, img.shape()[1] as u32, grayscale_img.into_iter().map(|x| x as u8).collect()).unwrap().write_to(&mut Cursor::new(&mut processed_buffer), ImageFormat::Png)
+        .map_err(|e| format!("Failed to encode processed image: {:?}", e))?;
+    let processed_base64 = general_purpose::STANDARD.encode(&processed_buffer);
+    let processed_data_url = format!("data:image/png;base64,{}", processed_base64);
+
+    Ok((original_data_url, processed_data_url))
+}
+
+
+fn draw_point(ctx: &CanvasRenderingContext2d, x: f64, y: f64, erase: bool, point_size: f64) {
+    if erase {
+        ctx.set_fill_style_str("black");
+    } else {
+        ctx.set_fill_style_str("white");
+    }
+    // Center the point
+    ctx.fill_rect(x - point_size / 2.0, y - point_size / 2.0, point_size, point_size);
+}
+
+#[component]
+fn PointSizeSlider(point_size: ReadSignal<f64>, set_point_size: WriteSignal<f64>) -> impl IntoView {
+    view! {
+        <input type="range" min="1" max="100" value=point_size on:input=move |evt| set_point_size.set(event_target_value(&evt).parse().unwrap()) />
+        {point_size}
+    }
+}
+
+#[component]
+fn App() -> impl IntoView {
+    // signal: true = erase, false = draw
+    let (is_erase, set_erase) = signal(false);
+    let (point_size, set_point_size) = signal(4.0);
+    // ref to the canvas element
+    let canvas_ref = NodeRef::<Canvas>::new();
+
+    // let (img_width, set_img_width) = signal(512);
+    // let (img_height, set_img_height) = signal(512);
+
+    
+    let file_input: NodeRef<Input> = NodeRef::new();
+    let (original_img_src, set_original_img_src) = signal(String::new());
+    let (processed_img_src, set_processed_img_src) = signal(String::new());
+
+    // set up pointer listeners once the canvas is in the DOM
+    Effect::new(move |_| {
+        let canvas = canvas_ref
+            .get()
+            .expect("canvas should be in the DOM");
+        // get 2D context
+        let ctx = canvas
+            .get_context("2d")
+            .unwrap()
+            .unwrap()
+            .dyn_into::<CanvasRenderingContext2d>()
+            .unwrap();
+
+        // track whether pointer is down
+        let is_drawing = std::rc::Rc::new(std::cell::Cell::new(false));
+        let drawing_flag = is_drawing.clone();
+        let erase_flag = is_erase;
+
+        // mousedown → start drawing
+        // let canvas_clone = canvas.clone();
+        EventListener::new(&canvas, "pointerdown", move |evt| {
+            drawing_flag.set(true);
+            let pe = evt.dyn_ref::<web_sys::PointerEvent>().unwrap();
+            let canvas = canvas_ref.get_untracked().unwrap();
+            let rect = canvas.get_bounding_client_rect();
+            // adjust for canvas position
+            let x = pe.client_x() as f64 - rect.left();
+            let y = pe.client_y() as f64 - rect.top();
+            // let x = pe.client_x() as f64;
+            // let y = pe.client_y() as f64;
+            draw_point(&ctx, x, y, erase_flag.get_untracked(), point_size.get_untracked());
+        })
+        .forget();
+
+        // pointerup anywhere → stop drawing
+        let drawing_flag_up = is_drawing.clone();
+        EventListener::new(&window().unwrap(), "pointerup", move |_| {
+            drawing_flag_up.set(false);
+        })
+        .forget();
+
+        // pointermove → draw if pointerdown
+        let ctx = canvas
+            .get_context("2d")
+            .unwrap()
+            .unwrap()
+            .dyn_into::<CanvasRenderingContext2d>()
+            .unwrap();  // Refresh context
+        EventListener::new(&canvas, "pointermove", move |evt| {
+            if !is_drawing.get() {
+                return;
+            }
+            let pe = evt.dyn_ref::<web_sys::PointerEvent>().unwrap();
+            let canvas = canvas_ref.get_untracked().unwrap();
+            let rect = canvas.get_bounding_client_rect();
+            let x = pe.client_x() as f64 - rect.left();
+            let y = pe.client_y() as f64 - rect.top();
+            // let x = pe.client_x() as f64;
+            // let y = pe.client_y() as f64;
+            draw_point(&ctx, x, y, erase_flag.get_untracked(), point_size.get_untracked());
+        })
+        .forget();
+    });
+
+    let update_image = move |_| {
+        spawn_local(async move {
+                let input_element = file_input.get();
+                set_original_img_src.set(convert_image_input_to_base_64(input_element).await.unwrap_or_default());
+            }
+        )
+    };
+
+
+    view! {
+        <div>
+            <input 
+                type="file" 
+                accept="image/*" 
+                node_ref=file_input
+                // on:
+                on:change=update_image
+            />
+
+            <Show when=move || !original_img_src.get().is_empty()>
+                <div class="image-box">
+                    <h2>"Original Image"</h2>
+                    <img src=original_img_src alt="Original Image" />
+                </div>
+            </Show>
+
+            <canvas
+                node_ref=canvas_ref
+                width=512
+                height=512
+                style="border:1px solid black; background:black;"
+            />
+            <br />
+            <button on:click=move |_| set_erase.set(false)>
+                "Draw"
+            </button>
+            <button on:click=move |_| set_erase.set(true)>
+                "Erase"
+            </button>
+            <br />
+            <p>Point size:</p>
+            <PointSizeSlider point_size=point_size set_point_size=set_point_size />
+            <p>Mode: {move || if is_erase.get() { "Erase" } else { "Draw" }}</p>
+            <br />
+            <button on:click=move |_| {
+                let canvas = canvas_ref.get().unwrap();
+                let ctx = canvas.get_context("2d").unwrap().unwrap().dyn_into::<CanvasRenderingContext2d>().unwrap();
+                ctx.clear_rect(0.0, 0.0, 512.0, 512.0);
+            }>
+                "Clear"
+            </button>
+            <br />
+            <button on:click=move |_| {
+                let canvas = canvas_ref
+                    .get()
+                    .expect("canvas should be in the DOM");
+                let image_string = canvas.to_data_url_with_type("image/png").expect("Failed to convert canvas to image");
+                // let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
+                // let image_array = image.as_luma8().unwrap();
+
+                let window = web_sys::window().unwrap();
+                let document = window.document().unwrap();
+                let a = document
+                    .create_element("a")
+                    .unwrap()
+                    .dyn_into::<web_sys::HtmlAnchorElement>()
+                    .unwrap();
+                a.set_href(&image_string);
+                a.set_download("canvas.png");
+                // // hide the link
+                // a.set_property("display", "none").unwrap();
+                // insert into DOM, trigger download, then remove
+                let body = document.body().unwrap();
+                body.append_child(&a).unwrap();
+                a.click();
+                body.remove_child(&a).unwrap();
+
+            }>
+                "Save as image"
+            </button>
+        </div>
+    }
+}
+
+
+fn main() {
+    console_error_panic_hook::set_once();
+    // mount the app to <body>
+    mount_to_body(|| view! { <App/> });
+}
