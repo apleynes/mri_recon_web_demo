@@ -147,13 +147,57 @@ fn PointSizeSlider(point_size: ReadSignal<f64>, set_point_size: WriteSignal<f64>
 
 #[component]
 fn AdaptiveCanvas(img_width: ReadSignal<u32>, img_height: ReadSignal<u32>, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
+    let overlay_ref = NodeRef::<Canvas>::new();
+
+    // Effect to draw the crosshair on the overlay
+    Effect::new(move |_| {
+        let width = img_width.get() as f64;
+        let height = img_height.get() as f64;
+        let overlay = overlay_ref
+            .get()
+            .expect("overlay canvas should be in the DOM");
+        overlay.set_width(width as u32);
+        overlay.set_height(height as u32);
+        let ctx = overlay
+            .get_context("2d")
+            .unwrap()
+            .unwrap()
+            .dyn_into::<CanvasRenderingContext2d>()
+            .unwrap();
+
+        // Clear the overlay
+        ctx.clear_rect(0.0, 0.0, width, height);
+
+        // Draw the crosshair
+        ctx.set_stroke_style_str("rgba(255, 0, 0, 1.0)"); // Semi-transparent red
+        ctx.set_line_width(1.0);
+        ctx.begin_path();
+        let center_x = width / 2.0;
+        let center_y = height / 2.0;
+        // Horizontal line
+        ctx.move_to(0.0, center_y);
+        ctx.line_to(width, center_y);
+        // Vertical line
+        ctx.move_to(center_x, 0.0);
+        ctx.line_to(center_x, height);
+        ctx.stroke();
+    });
+
     view! {
-        <canvas
-            node_ref=canvas_ref
-            width=move || img_width.get()
-            height=move || img_height.get()
-            style="border:1px solid black; background:black;"
-        />
+        <div style="position: relative;">
+            <canvas
+                node_ref=canvas_ref
+                width=move || img_width.get()
+                height=move || img_height.get()
+                style="border:1px solid black; background:black;"
+            />
+            <canvas
+                node_ref=overlay_ref
+                // width=move || img_width.get()  // Need to set width and height in the effect for the crosshair update to work
+                // height=move || img_height.get()
+                style="position: absolute; top: 0; left: 0; opacity: 0.5; pointer-events: none;"
+            />
+        </div>
     }
 }
 
@@ -165,16 +209,67 @@ fn App() -> impl IntoView {
     // ref to the canvas element
     let canvas_ref = NodeRef::<Canvas>::new();
 
-    let (img_width, set_img_width) = signal(512);
-    let (img_height, set_img_height) = signal(512);
+    let (img_width, set_img_width) = signal(32);
+    let (img_height, set_img_height) = signal(32);
 
-    let (img_fft_vec, set_img_fft_vec) = signal(Vec::<Complex<f64>>::new());
+    let (img_fft_vec, set_img_fft_vec) = signal(Array2::<Complex<f64>>::zeros((32, 32)).into_raw_vec_and_offset().0);
     let (reconstructed_img, set_reconstructed_img) = signal(String::new());
 
     
     let file_input: NodeRef<Input> = NodeRef::new();
     let (original_img_src, set_original_img_src) = signal(String::new());
     let (processed_img_src, set_processed_img_src) = signal(String::new());
+
+    
+    let reconstruct_img_and_set_reconstructed_img = move |_| {
+        spawn_local(async move {
+            // Get sampling mask from canvas
+
+            let canvas = canvas_ref
+            .get()
+            .expect("canvas should be in the DOM");
+            let image_string = canvas.to_data_url_with_type("image/png").expect("Failed to convert canvas to image");
+            // log!("image_string: {:?}", image_string);
+            // let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
+            let image = convert_data_url_to_image(&image_string).expect("Failed to convert data URL to image");
+            let image_array: GrayImage = image.into_luma8();
+            let mask = image_array.as_ndarray2();
+            let mask = mask.map(|x| *x as f64);
+            let mask = mask.map(|x| if *x > 128.0 { 1.0 } else { 0.0 });
+
+            let fft_vec = img_fft_vec.get();
+            let width = img_width.get() as usize;
+            let height = img_height.get() as usize;
+            let fft_img = Array2::from_shape_vec((height, width), fft_vec).unwrap();
+
+            let mut masked_fft_img = Array2::zeros((height, width));
+            // azip!((i in 0..height, j in 0..width) {
+            //     masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
+            // });
+            for i in 0..height {
+                for j in 0..width {
+                    masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
+                }
+            }
+            let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
+            let reconstructed_img = fft::ifft2(&masked_fft_img.view());
+            // Convert to real
+            let reconstructed_img = reconstructed_img.map(|x| x.re);
+            // Normalize from 0 to 255
+
+            let max_val = reconstructed_img.fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+            let min_val = reconstructed_img.fold(f64::INFINITY, |a, &b| a.min(b));
+            let reconstructed_img = reconstructed_img.map(|x| (x * 255.0 / (max_val - min_val)) as u8);
+
+            let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
+            let mut reconstructed_buffer = Vec::new();
+            reconstructed_img.write_to(&mut Cursor::new(&mut reconstructed_buffer), ImageFormat::Png)
+                .map_err(|e| format!("Failed to encode reconstructed image: {:?}", e)).expect("Failed to encode reconstructed image");
+            let reconstructed_base64 = general_purpose::STANDARD.encode(&reconstructed_buffer);
+            set_reconstructed_img.set(format!("data:image/png;base64,{}", reconstructed_base64));
+        })
+    };
+
 
     // set up pointer listeners once the canvas is in the DOM
     Effect::new(move |_| {
@@ -214,8 +309,63 @@ fn App() -> impl IntoView {
         let drawing_flag_up = is_drawing.clone();
         EventListener::new(&window().unwrap(), "pointerup", move |_| {
             drawing_flag_up.set(false);
+
+            spawn_local(async move {
+                // Get sampling mask from canvas
+    
+                let canvas = canvas_ref
+                .get()
+                .expect("canvas should be in the DOM");
+                let image_string = canvas.to_data_url_with_type("image/png").expect("Failed to convert canvas to image");
+                // log!("image_string: {:?}", image_string);
+                // let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
+                let image = convert_data_url_to_image(&image_string).expect("Failed to convert data URL to image");
+                let image_array: GrayImage = image.into_luma8();
+                let mask = image_array.as_ndarray2();
+                let mask = mask.map(|x| *x as f64);
+                let mask = mask.map(|x| if *x > 128.0 { 1.0 } else { 0.0 });
+    
+                let fft_vec = img_fft_vec.get();
+                let width = img_width.get() as usize;
+                let height = img_height.get() as usize;
+                let fft_img = Array2::from_shape_vec((height, width), fft_vec).unwrap();
+    
+                let mut masked_fft_img = Array2::zeros((height, width));
+                // azip!((i in 0..height, j in 0..width) {
+                //     masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
+                // });
+                for i in 0..height {
+                    for j in 0..width {
+                        masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
+                    }
+                }
+                let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
+                let reconstructed_img = fft::ifft2(&masked_fft_img.view());
+                // Convert to real
+                let reconstructed_img = reconstructed_img.map(|x| x.re);
+                // Normalize from 0 to 255
+    
+                let max_val = reconstructed_img.fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                let min_val = reconstructed_img.fold(f64::INFINITY, |a, &b| a.min(b));
+                let reconstructed_img = reconstructed_img.map(|x| (x * 255.0 / (max_val - min_val)) as u8);
+    
+                let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
+                let mut reconstructed_buffer = Vec::new();
+                reconstructed_img.write_to(&mut Cursor::new(&mut reconstructed_buffer), ImageFormat::Png)
+                    .map_err(|e| format!("Failed to encode reconstructed image: {:?}", e)).expect("Failed to encode reconstructed image");
+                let reconstructed_base64 = general_purpose::STANDARD.encode(&reconstructed_buffer);
+                set_reconstructed_img.set(format!("data:image/png;base64,{}", reconstructed_base64));
+            })
+
         })
         .forget();
+
+        // // pointerup → reconstruct image
+        // let reconstruct_img_and_set_reconstructed_img_clone = reconstruct_img_and_set_reconstructed_img.clone();
+        // EventListener::new(&window().unwrap(), "pointerup", move |evt| {
+        //     reconstruct_img_and_set_reconstructed_img_clone(evt);
+        // })
+        // .forget();
 
         // pointermove → draw if pointerdown
         let ctx = canvas
@@ -278,57 +428,6 @@ fn App() -> impl IntoView {
             ctx.fill_rect(0.0, 0.0, img_width.get() as f64, img_height.get() as f64);
         })
     };
-
-    
-    let reconstruct_img_and_set_reconstructed_img = move |_| {
-        spawn_local(async move {
-            // Get sampling mask from canvas
-
-            let canvas = canvas_ref
-            .get()
-            .expect("canvas should be in the DOM");
-            let image_string = canvas.to_data_url_with_type("image/png").expect("Failed to convert canvas to image");
-            log!("image_string: {:?}", image_string);
-            // let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
-            let image = convert_data_url_to_image(&image_string).expect("Failed to convert data URL to image");
-            let image_array: GrayImage = image.into_luma8();
-            let mask = image_array.as_ndarray2();
-            let mask = mask.map(|x| *x as f64);
-            let mask = mask.map(|x| if *x > 128.0 { 1.0 } else { 0.0 });
-
-            let fft_vec = img_fft_vec.get();
-            let width = img_width.get() as usize;
-            let height = img_height.get() as usize;
-            let fft_img = Array2::from_shape_vec((height, width), fft_vec).unwrap();
-
-            let mut masked_fft_img = Array2::zeros((height, width));
-            // azip!((i in 0..height, j in 0..width) {
-            //     masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
-            // });
-            for i in 0..height {
-                for j in 0..width {
-                    masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
-                }
-            }
-            let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
-            let reconstructed_img = fft::ifft2(&masked_fft_img.view());
-            // Convert to real
-            let reconstructed_img = reconstructed_img.map(|x| x.re);
-            // Normalize from 0 to 255
-
-            let max_val = reconstructed_img.fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-            let min_val = reconstructed_img.fold(f64::INFINITY, |a, &b| a.min(b));
-            let reconstructed_img = reconstructed_img.map(|x| (x * 255.0 / (max_val - min_val)) as u8);
-
-            let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
-            let mut reconstructed_buffer = Vec::new();
-            reconstructed_img.write_to(&mut Cursor::new(&mut reconstructed_buffer), ImageFormat::Png)
-                .map_err(|e| format!("Failed to encode reconstructed image: {:?}", e)).expect("Failed to encode reconstructed image");
-            let reconstructed_base64 = general_purpose::STANDARD.encode(&reconstructed_buffer);
-            set_reconstructed_img.set(format!("data:image/png;base64,{}", reconstructed_base64));
-        })
-    };
-
 
     view! {
         <div>
@@ -403,7 +502,7 @@ fn App() -> impl IntoView {
                 "Reconstruct image"
             </button>
 
-            <Show when=move || !reconstructed_img.get().is_empty()>
+            <Show when=move || !reconstructed_img.get().is_empty() || !original_img_src.get().is_empty()>
                 <div class="image-box">
                     <h2>"Reconstructed Image"</h2>
                     <img src=reconstructed_img alt="Reconstructed Image" />
