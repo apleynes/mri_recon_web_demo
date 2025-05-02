@@ -1,7 +1,7 @@
 use std::{fs::File, io::Cursor};
 
 use gloo_events::EventListener;
-use leptos::{html::{Canvas, Input}, prelude::*, task::spawn_local};
+use leptos::{html::{Canvas, Input}, logging::log, prelude::*, task::spawn_local};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{window, Blob, CanvasRenderingContext2d, Element, HtmlCanvasElement, HtmlInputElement, MouseEvent, Url};
@@ -12,7 +12,7 @@ use ndarray::{Array2, Array3, s};
 mod fft;
 
 
-async fn convert_image_input_to_base_64(input: Option<HtmlInputElement>) -> Result<String, String> {
+async fn convert_image_input_to_base_64(input: Option<HtmlInputElement>) -> Result<(String, u32, u32), String> {
     let input = input.ok_or("No input element found")?;
     let files = input.files().ok_or("No files selected")?;
     let file = files.get(0).ok_or("No file found")?;
@@ -32,12 +32,16 @@ async fn convert_image_input_to_base_64(input: Option<HtmlInputElement>) -> Resu
         .map_err(|e| format!("Failed to decode image: {:?}", e))?;
     let img: RgbImage = img.into_rgb8();
 
+    // Get the width and height of the image
+    let width = img.width();
+    let height = img.height();
+
     // Convert original image to base64 for display
     let mut original_buffer = Vec::new();
     img.write_to(&mut Cursor::new(&mut original_buffer), ImageFormat::Png)
         .map_err(|e| format!("Failed to encode original image: {:?}", e))?;
     let original_base64 = general_purpose::STANDARD.encode(&original_buffer);
-    Ok(format!("data:image/png;base64,{}", original_base64))
+    Ok((format!("data:image/png;base64,{}", original_base64), width, height))
 }
 
 
@@ -115,16 +119,29 @@ fn PointSizeSlider(point_size: ReadSignal<f64>, set_point_size: WriteSignal<f64>
     }
 }
 
+
 #[component]
+fn AdaptiveCanvas(img_width: ReadSignal<u32>, img_height: ReadSignal<u32>, canvas_ref: NodeRef<Canvas>) -> impl IntoView {
+    view! {
+        <canvas
+            node_ref=canvas_ref
+            width=move || img_width.get()
+            height=move || img_height.get()
+            style="border:1px solid black; background:black;"
+        />
+    }
+}
+
 fn App() -> impl IntoView {
+
     // signal: true = erase, false = draw
     let (is_erase, set_erase) = signal(false);
     let (point_size, set_point_size) = signal(4.0);
     // ref to the canvas element
     let canvas_ref = NodeRef::<Canvas>::new();
 
-    // let (img_width, set_img_width) = signal(512);
-    // let (img_height, set_img_height) = signal(512);
+    let (img_width, set_img_width) = signal(512);
+    let (img_height, set_img_height) = signal(512);
 
     
     let file_input: NodeRef<Input> = NodeRef::new();
@@ -197,10 +214,12 @@ fn App() -> impl IntoView {
 
     let update_image = move |_| {
         spawn_local(async move {
-                let input_element = file_input.get();
-                set_original_img_src.set(convert_image_input_to_base_64(input_element).await.unwrap_or_default());
-            }
-        )
+            let input_element = file_input.get();
+            let (base64, width, height) = convert_image_input_to_base_64(input_element).await.expect("Failed to process image");
+            set_original_img_src.set(base64);
+            set_img_width.set(width);
+            set_img_height.set(height);
+        })
     };
 
 
@@ -221,12 +240,8 @@ fn App() -> impl IntoView {
                 </div>
             </Show>
 
-            <canvas
-                node_ref=canvas_ref
-                width=512
-                height=512
-                style="border:1px solid black; background:black;"
-            />
+            <AdaptiveCanvas img_width=img_width img_height=img_height canvas_ref=canvas_ref />
+
             <br />
             <button on:click=move |_| set_erase.set(false)>
                 "Draw"
