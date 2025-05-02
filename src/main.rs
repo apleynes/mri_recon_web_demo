@@ -9,7 +9,7 @@ use web_sys::{window, Blob, CanvasRenderingContext2d, Element, HtmlCanvasElement
 use image::{ImageReader, RgbImage, ImageFormat, GrayImage};
 use base64::{engine::general_purpose, Engine as _};
 use nshare::{AsNdarray2, AsNdarray3, IntoNdarray3};
-use ndarray::{Array2, Array3, s};
+use ndarray::{Array2, Array3, s, azip};
 mod fft;
 
 
@@ -245,17 +245,46 @@ fn App() -> impl IntoView {
             let fft_vec = fft::fft2(&complex_img.view());
             let (v, offset) = fft_vec.into_raw_vec_and_offset();
             set_img_fft_vec.set(v);
+
+            // Clear the canvas
+            let canvas = canvas_ref.get().unwrap();
+            let ctx = canvas.get_context("2d").unwrap().unwrap().dyn_into::<CanvasRenderingContext2d>().unwrap();
+            ctx.set_fill_style_str("black");
+            ctx.fill_rect(0.0, 0.0, img_width.get() as f64, img_height.get() as f64);
         })
     };
 
     
     let reconstruct_img_and_set_reconstructed_img = move |_| {
         spawn_local(async move {
+            // Get sampling mask from canvas
+
+            let canvas = canvas_ref
+            .get()
+            .expect("canvas should be in the DOM");
+            let image_string = canvas.to_data_url_with_type("image/png").expect("Failed to convert canvas to image");
+            let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
+            let image_array: GrayImage = image.into_luma8();
+            let mask = image_array.as_ndarray2();
+            let mask = mask.map(|x| *x as f64);
+            let mask = mask.map(|x| if *x > 128.0 { 1.0 } else { 0.0 });
+
             let fft_vec = img_fft_vec.get();
             let width = img_width.get() as usize;
             let height = img_height.get() as usize;
             let fft_img = Array2::from_shape_vec((height, width), fft_vec).unwrap();
-            let reconstructed_img = fft::ifft2(&fft_img.view());
+
+            let mut masked_fft_img = Array2::zeros((height, width));
+            // azip!((i in 0..height, j in 0..width) {
+            //     masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
+            // });
+            for i in 0..height {
+                for j in 0..width {
+                    masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
+                }
+            }
+
+            let reconstructed_img = fft::ifft2(&masked_fft_img.view());
             // Convert to real
             let reconstructed_img = reconstructed_img.map(|x| x.re);
             // Normalize from 0 to 255
@@ -308,7 +337,8 @@ fn App() -> impl IntoView {
             <button on:click=move |_| {
                 let canvas = canvas_ref.get().unwrap();
                 let ctx = canvas.get_context("2d").unwrap().unwrap().dyn_into::<CanvasRenderingContext2d>().unwrap();
-                ctx.clear_rect(0.0, 0.0, 512.0, 512.0);
+                ctx.set_fill_style_str("black");
+                ctx.fill_rect(0.0, 0.0, img_width.get() as f64, img_height.get() as f64);
             }>
                 "Clear"
             </button>
