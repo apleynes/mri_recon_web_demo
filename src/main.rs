@@ -426,11 +426,25 @@ fn App() -> impl IntoView {
             let ctx = canvas.get_context("2d").unwrap().unwrap().dyn_into::<CanvasRenderingContext2d>().unwrap();
             ctx.set_fill_style_str("black");
             ctx.fill_rect(0.0, 0.0, img_width.get() as f64, img_height.get() as f64);
+
+            // Clear the reconstructed image
+            let reconstructed_img = Array2::zeros((img_height.get() as usize, img_width.get() as usize));
+    
+            let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
+            let mut reconstructed_buffer = Vec::new();
+            reconstructed_img.write_to(&mut Cursor::new(&mut reconstructed_buffer), ImageFormat::Png)
+                .map_err(|e| format!("Failed to encode reconstructed image: {:?}", e)).expect("Failed to encode reconstructed image");
+            let reconstructed_base64 = general_purpose::STANDARD.encode(&reconstructed_buffer);
+            set_reconstructed_img.set(format!("data:image/png;base64,{}", reconstructed_base64));
         })
     };
 
     view! {
         <div>
+            <h1>"Undersampled MR Image Reconstruction Demo"</h1>
+            <h2>"Instructions"</h2>
+            <p>"Upload an image to the canvas. Then, draw a sampling mask on the canvas by clicking and dragging inside the canvas. The red crosshair indicates the center of the canvas (center of k-space). The image will be reconstructed from the mask as soon as you release the mouse button."</p>
+            <h2>"Upload image"</h2>
             <input 
                 type="file" 
                 accept="image/*" 
@@ -446,7 +460,19 @@ fn App() -> impl IntoView {
                 </div>
             </Show>
 
-            <AdaptiveCanvas img_width=img_width img_height=img_height canvas_ref=canvas_ref />
+            <div style="display: flex; flex-direction: row; gap: 10px;">
+                <div class="image-box">
+                    <h2>"Sampling mask"</h2>
+                    <AdaptiveCanvas img_width=img_width img_height=img_height canvas_ref=canvas_ref />
+                </div>
+
+                <Show when=move || !reconstructed_img.get().is_empty() && !original_img_src.get().is_empty()>
+                    <div class="image-box">
+                        <h2>"Zero-filled Reconstructed Image"</h2>
+                        <img src=reconstructed_img alt="Reconstructed Image" />
+                    </div>
+                </Show>
+            </div>
 
             <br />
             <button on:click=move |_| set_erase.set(false)>
@@ -501,13 +527,6 @@ fn App() -> impl IntoView {
             <button on:click=reconstruct_img_and_set_reconstructed_img>
                 "Reconstruct image"
             </button>
-
-            <Show when=move || !reconstructed_img.get().is_empty() || !original_img_src.get().is_empty()>
-                <div class="image-box">
-                    <h2>"Reconstructed Image"</h2>
-                    <img src=reconstructed_img alt="Reconstructed Image" />
-                </div>
-            </Show>
         </div>
     }
 }
