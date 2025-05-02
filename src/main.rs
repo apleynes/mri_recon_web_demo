@@ -2,12 +2,13 @@ use std::{fs::File, io::Cursor};
 
 use gloo_events::EventListener;
 use leptos::{html::{Canvas, Input}, logging::log, prelude::*, task::spawn_local};
+use ndrustfft::Complex;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{window, Blob, CanvasRenderingContext2d, Element, HtmlCanvasElement, HtmlInputElement, MouseEvent, Url};
 use image::{ImageReader, RgbImage, ImageFormat, GrayImage};
 use base64::{engine::general_purpose, Engine as _};
-use nshare::{IntoNdarray3, AsNdarray3};
+use nshare::{AsNdarray2, AsNdarray3, IntoNdarray3};
 use ndarray::{Array2, Array3, s};
 mod fft;
 
@@ -143,6 +144,9 @@ fn App() -> impl IntoView {
     let (img_width, set_img_width) = signal(512);
     let (img_height, set_img_height) = signal(512);
 
+    let (img_fft_vec, set_img_fft_vec) = signal(Vec::<Complex<f64>>::new());
+    let (reconstructed_img, set_reconstructed_img) = signal(String::new());
+
     
     let file_input: NodeRef<Input> = NodeRef::new();
     let (original_img_src, set_original_img_src) = signal(String::new());
@@ -215,10 +219,57 @@ fn App() -> impl IntoView {
     let update_image = move |_| {
         spawn_local(async move {
             let input_element = file_input.get();
-            let (base64, width, height) = convert_image_input_to_base_64(input_element).await.expect("Failed to process image");
+            let (base64, width, height) = convert_image_input_to_base_64(input_element.clone()).await.expect("Failed to process image");
             set_original_img_src.set(base64);
             set_img_width.set(width);
             set_img_height.set(height);
+            // Convert image to array
+            let input = input_element.clone().ok_or("No input element found").expect("No input element found");
+            let files = input.files().ok_or("No files selected").expect("No files selected");
+            let file = files.get(0).ok_or("No file found").expect("No file found");
+        
+            // Read file as ArrayBuffer
+            let array_buffer_promise = file.array_buffer();
+            let array_buffer = wasm_bindgen_futures::JsFuture::from(array_buffer_promise)
+                .await
+                .map_err(|e| format!("Failed to read file: {:?}", e)).expect("Failed to read file");
+        
+            // Convert to Uint8Array and then to Vec<u8>
+            let uint8_array = js_sys::Uint8Array::new(&array_buffer);
+            let buffer_vec = uint8_array.to_vec();
+            let img = image::load_from_memory(&buffer_vec)
+                .map_err(|e| format!("Failed to decode image: {:?}", e)).expect("Failed to decode image");
+            let img: GrayImage = img.into_luma8();
+            let img = img.as_ndarray2();
+            let complex_img: Array2<Complex<f64>> = img.map(|x| Complex::new(*x as f64, 0.0));
+            let fft_vec = fft::fft2(&complex_img.view());
+            let (v, offset) = fft_vec.into_raw_vec_and_offset();
+            set_img_fft_vec.set(v);
+        })
+    };
+
+    
+    let reconstruct_img_and_set_reconstructed_img = move |_| {
+        spawn_local(async move {
+            let fft_vec = img_fft_vec.get();
+            let width = img_width.get() as usize;
+            let height = img_height.get() as usize;
+            let fft_img = Array2::from_shape_vec((height, width), fft_vec).unwrap();
+            let reconstructed_img = fft::ifft2(&fft_img.view());
+            // Convert to real
+            let reconstructed_img = reconstructed_img.map(|x| x.re);
+            // Normalize from 0 to 255
+
+            let max_val = reconstructed_img.fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+            let min_val = reconstructed_img.fold(f64::INFINITY, |a, &b| a.min(b));
+            let reconstructed_img = reconstructed_img.map(|x| (x * 255.0 / (max_val - min_val)) as u8);
+
+            let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
+            let mut reconstructed_buffer = Vec::new();
+            reconstructed_img.write_to(&mut Cursor::new(&mut reconstructed_buffer), ImageFormat::Png)
+                .map_err(|e| format!("Failed to encode reconstructed image: {:?}", e)).expect("Failed to encode reconstructed image");
+            let reconstructed_base64 = general_purpose::STANDARD.encode(&reconstructed_buffer);
+            set_reconstructed_img.set(format!("data:image/png;base64,{}", reconstructed_base64));
         })
     };
 
@@ -290,6 +341,17 @@ fn App() -> impl IntoView {
             }>
                 "Save as image"
             </button>
+
+            <button on:click=reconstruct_img_and_set_reconstructed_img>
+                "Reconstruct image"
+            </button>
+
+            <Show when=move || !reconstructed_img.get().is_empty()>
+                <div class="image-box">
+                    <h2>"Reconstructed Image"</h2>
+                    <img src=reconstructed_img alt="Reconstructed Image" />
+                </div>
+            </Show>
         </div>
     }
 }
