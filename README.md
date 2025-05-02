@@ -4,10 +4,18 @@ This is a web demo for undersampled zero-filled MRI reconstruction written in Ru
 
 The demo is deployed on Github Pages at https://apleynes.github.io/mri_recon_web_demo
 
+Roadmap:
+- [x] Zero-filled reconstruction
+- [ ] Compressed sensing reconstruction
+- [ ] Accelerate reconstruction with WebGPU and Web Workers
+- [ ] Add a "reconstruction options" section
+
 ## Local Usage
 
 ```bash
 trunk serve --release --open
 ```
 
+## License
 
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

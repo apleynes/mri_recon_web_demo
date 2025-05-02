@@ -444,6 +444,7 @@ fn App() -> impl IntoView {
             <h1>"Undersampled MR Image Reconstruction Demo"</h1>
             <h2>"Instructions"</h2>
             <p>"Upload an image to the canvas. Then, draw a sampling mask on the canvas by clicking and dragging inside the canvas. The red crosshair indicates the center of the canvas (center of k-space). The image will be reconstructed from the mask as soon as you release the mouse button."</p>
+            <p>"The demo runs entirely in the browser using your machine's CPU. No data is sent to any servers."</p>
             <h2>"Upload image"</h2>
             <input 
                 type="file" 
