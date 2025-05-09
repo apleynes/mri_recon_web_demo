@@ -152,7 +152,7 @@ pub fn tgv_mri_reconstruction(
             *x += &sigma * (y - z);
         });
         let p = proj_p(&p.view(), &(&alpha1 * &lambda));
-        log!("Min max: {}, {}", p.clone().into_iter().reduce(f32::min).unwrap(), p.clone().into_iter().reduce(f32::max).unwrap());
+        // log!("Min max: {}, {}", p.clone().into_iter().reduce(f32::min).unwrap(), p.clone().into_iter().reduce(f32::max).unwrap());
 
         let sym_grad_w_bar = sym_gradient(&w_bar.view());
         par_azip!((x in &mut q, &y in &sym_grad_w_bar) {
@@ -200,13 +200,13 @@ pub fn tgv_mri_reconstruction(
         });
 
         let total_residual: f64 = residual.map(|x| x.re.powi(2)).sum();
-        log!("Iteration: {}, Total residual: {}", i, total_residual);
+        // log!("Iteration: {}, Total residual: {}", i, total_residual);
 
-        log!("Min max: {}, {}", u.clone().into_iter().reduce(f32::min).unwrap(), u.clone().into_iter().reduce(f32::max).unwrap());
+        // log!("Min max: {}, {}", u.clone().into_iter().reduce(f32::min).unwrap(), u.clone().into_iter().reduce(f32::max).unwrap());
     }
     // Convert to real
     // let u = Array2::<f32>::from_shape_vec((ny, nx), u.into_iter().map(|x| x.re as f32).collect()).unwrap();
-    log!("Min max: {}, {}", u.clone().into_iter().reduce(f32::min).unwrap(), u.clone().into_iter().reduce(f32::max).unwrap());
+    // log!("Min max: {}, {}", u.clone().into_iter().reduce(f32::min).unwrap(), u.clone().into_iter().reduce(f32::max).unwrap());
     u
 }
 

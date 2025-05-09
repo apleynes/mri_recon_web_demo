@@ -680,7 +680,7 @@ fn normalize_image_by_min_max(img: Array2<f32>) -> Array2<u8> {
 
 fn main() {
     console_error_panic_hook::set_once();
-    leptos::attr::csp("worker-src 'self' blob:;");
+    leptos::attr::csp("worker-src 'self' blob:; script-src 'unsafe-inline' 'self' blob:;");
     // mount the app to <body>
     mount_to_body(|| view! { <App/> });
 }
