@@ -262,8 +262,8 @@ fn App() -> impl IntoView {
                 }
             }
             let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
-
             let reconstructed_img = zero_filled_recon(masked_fft_img);
+
             // let reconstructed_img = tgv::tgv_mri_reconstruction(
             //     &masked_fft_img.view(), 
             //     &mask.map(|x| *x as f32).view(), 
@@ -409,15 +409,15 @@ fn App() -> impl IntoView {
                         masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
                     }
                 }
-                let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
-                let reconstructed_img = zero_filled_recon(masked_fft_img);
-                // let reconstructed_img = tgv::tgv_mri_reconstruction(
-                //     &masked_fft_img.view(), 
-                //     &mask.map(|x| *x as f32).view(), 
-                //     5.0, 
-                //     2.0, 
-                //     1.0, 
-                //     0.1, 0.1, 20);
+                // let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
+                // let reconstructed_img = zero_filled_recon(masked_fft_img);
+                let reconstructed_img = tgv::tgv_mri_reconstruction(
+                    &masked_fft_img.view(), 
+                    &mask.map(|x| *x as f32).view(), 
+                    5.0, 
+                    2.0, 
+                    1.0, 
+                    0.1, 0.1, 20);
                 let reconstructed_img = normalize_image_by_min_max(reconstructed_img);
     
                 let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
