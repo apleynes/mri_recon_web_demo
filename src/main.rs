@@ -1,3 +1,4 @@
+pub use wasm_bindgen_rayon::init_thread_pool;
 use std::{fs::File, io::Cursor};
 
 use gloo_events::EventListener;
@@ -679,6 +680,7 @@ fn normalize_image_by_min_max(img: Array2<f32>) -> Array2<u8> {
 
 fn main() {
     console_error_panic_hook::set_once();
+    leptos::attr::csp("worker-src 'self' blob:;");
     // mount the app to <body>
     mount_to_body(|| view! { <App/> });
 }

@@ -1,3 +1,5 @@
+cargo-features = ["edition2024"]
+
 [package]
 name = "leptos_mri_recon"
 version = "0.1.0"
@@ -16,7 +18,8 @@ ndrustfft = "0.5.0"
 nshare = "0.10.0"
 num-complex = "0.4.6"
 rayon = "1.10.0"
-wasm-bindgen = "0.2.100"
+wasm-bindgen = "0.2.93"
 wasm-bindgen-futures = "0.4.50"
+wasm-bindgen-rayon = { version = "1.3.0", features = ["no-bundler"] }
 web-sys = { version = "0.3.77", features = ["CanvasRenderingContext2d", "Document", "Element", "HtmlCanvasElement", "Window", "DomRect", "FileList", "File"] }
 
