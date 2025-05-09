@@ -11,6 +11,7 @@ use base64::{engine::general_purpose, Engine as _};
 use nshare::{AsNdarray2, AsNdarray3, IntoNdarray3};
 use ndarray::{Array2, Array3, s, azip};
 mod fft;
+mod tgv;
 
 
 async fn convert_image_input_to_base_64(input: Option<HtmlInputElement>) -> Result<(String, u32, u32), String> {
