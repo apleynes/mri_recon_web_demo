@@ -21,3 +21,7 @@ trunk serve --release --open
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+## Dev notes
+
+Zero-filled reconstruction is slower than original version. Need to investigate why.

@@ -9,9 +9,9 @@ pub fn fft2(gray_img: &ArrayView2<Complex<f64>>) -> Array2<Complex<f64>> {
     let (ny, nx) = gray_img.dim();
     let mut fft_img = Array2::<Complex<f64>>::zeros((ny, nx));
     let mut fft_handler = FftHandler::new(nx);
-    ndrustfft::ndfft_par(&gray_img, &mut fft_img, &mut fft_handler, 1);
+    ndrustfft::ndfft(&gray_img, &mut fft_img, &mut fft_handler, 1);
     let mut fft_handler = FftHandler::new(ny);
-    ndrustfft::ndfft_par(&fft_img.clone(), &mut fft_img, &mut fft_handler, 0);
+    ndrustfft::ndfft(&fft_img.clone(), &mut fft_img, &mut fft_handler, 0);
     fft_img
 }
 
@@ -19,9 +19,9 @@ pub fn ifft2(fft_img: &ArrayView2<Complex<f64>>) -> Array2<Complex<f64>> {
     let (ny, nx) = fft_img.dim();
     let mut ifft_img = Array2::<Complex<f64>>::zeros((ny, nx));
     let mut ifft_handler = FftHandler::new(ny);
-    ndrustfft::ndifft_par(&fft_img, &mut ifft_img, &mut ifft_handler, 0);
+    ndrustfft::ndifft(&fft_img, &mut ifft_img, &mut ifft_handler, 0);
     let mut ifft_handler = FftHandler::new(nx);
-    ndrustfft::ndifft_par(&ifft_img.clone(), &mut ifft_img, &mut ifft_handler, 1);
+    ndrustfft::ndifft(&ifft_img.clone(), &mut ifft_img, &mut ifft_handler, 1);
     ifft_img
 }
     // println!("fft_gray_img shape: {:?}", fft_gray_img.dim());
