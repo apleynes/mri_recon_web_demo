@@ -261,16 +261,21 @@ fn App() -> impl IntoView {
                 }
             }
             let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
-            let reconstructed_img = fft::ifft2(&masked_fft_img.view());
-            // Convert to real
-            let reconstructed_img = reconstructed_img.map(|x| x.re);
-            // Normalize from 0 to 255
 
-            let max_val = reconstructed_img.fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-            let min_val = reconstructed_img.fold(f64::INFINITY, |a, &b| a.min(b));
-            let reconstructed_img = reconstructed_img.map(|x| (x * 255.0 / (max_val - min_val)) as u8);
+            // let reconstructed_img = zero_filled_recon(masked_fft_img);
+            let reconstructed_img = tgv::tgv_mri_reconstruction(
+                &masked_fft_img.view(), 
+                &mask.map(|x| *x as f32).view(), 
+                10.0, 
+                2.0, 
+                1.0, 
+                1.0/12.0, 
+                1.0/12.0, 
+                100);
+            let reconstructed_img = normalize_image_by_min_max(reconstructed_img);
 
             let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
+            
             let mut reconstructed_buffer = Vec::new();
             reconstructed_img.write_to(&mut Cursor::new(&mut reconstructed_buffer), ImageFormat::Png)
                 .map_err(|e| format!("Failed to encode reconstructed image: {:?}", e)).expect("Failed to encode reconstructed image");
@@ -312,55 +317,59 @@ fn App() -> impl IntoView {
             // let y = pe.client_y() as f64;
             draw_point(&ctx, x, y, erase_flag.get_untracked(), point_size.get_untracked());
 
-            let recon_interactivity_mode: ReconInteractivityMode = recon_interactivity_mode.get_untracked();
-            if recon_interactivity_mode == ReconInteractivityMode::OnMouseUp {
-                spawn_local(async move {
-                    // Get sampling mask from canvas
+            // let recon_interactivity_mode: ReconInteractivityMode = recon_interactivity_mode.get_untracked();
+            // if recon_interactivity_mode == ReconInteractivityMode::OnDraw {
+            //     spawn_local(async move {
+            //         // Get sampling mask from canvas
     
-                let canvas = canvas_ref
-                .get()
-                .expect("canvas should be in the DOM");
-                let image_string = canvas.to_data_url_with_type("image/png").expect("Failed to convert canvas to image");
-                // log!("image_string: {:?}", image_string);
-                // let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
-                let image = convert_data_url_to_image(&image_string).expect("Failed to convert data URL to image");
-                let image_array: GrayImage = image.into_luma8();
-                let mask = image_array.as_ndarray2();
-                let mask = mask.map(|x| *x as f64);
-                let mask = mask.map(|x| if *x > 128.0 { 1.0 } else { 0.0 });
+            //     let canvas = canvas_ref
+            //     .get()
+            //     .expect("canvas should be in the DOM");
+            //     let image_string = canvas.to_data_url_with_type("image/png").expect("Failed to convert canvas to image");
+            //     // log!("image_string: {:?}", image_string);
+            //     // let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
+            //     let image = convert_data_url_to_image(&image_string).expect("Failed to convert data URL to image");
+            //     let image_array: GrayImage = image.into_luma8();
+            //     let mask = image_array.as_ndarray2();
+            //     let mask = mask.map(|x| *x as f64);
+            //     let mask = mask.map(|x| if *x > 128.0 { 1.0 } else { 0.0 });
     
-                let fft_vec = img_fft_vec.get();
-                let width = img_width.get() as usize;
-                let height = img_height.get() as usize;
-                let fft_img = Array2::from_shape_vec((height, width), fft_vec).unwrap();
+            //     let fft_vec = img_fft_vec.get();
+            //     let width = img_width.get() as usize;
+            //     let height = img_height.get() as usize;
+            //     let fft_img = Array2::from_shape_vec((height, width), fft_vec).unwrap();
     
-                let mut masked_fft_img = Array2::zeros((height, width));
-                // azip!((i in 0..height, j in 0..width) {
-                //     masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
-                // });
-                for i in 0..height {
-                    for j in 0..width {
-                        masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
-                    }
-                }
-                let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
-                let reconstructed_img = fft::ifft2(&masked_fft_img.view());
-                // Convert to real
-                let reconstructed_img = reconstructed_img.map(|x| x.re);
-                // Normalize from 0 to 255
-    
-                let max_val = reconstructed_img.fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-                let min_val = reconstructed_img.fold(f64::INFINITY, |a, &b| a.min(b));
-                let reconstructed_img = reconstructed_img.map(|x| (x * 255.0 / (max_val - min_val)) as u8);
-    
-                let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
-                let mut reconstructed_buffer = Vec::new();
-                reconstructed_img.write_to(&mut Cursor::new(&mut reconstructed_buffer), ImageFormat::Png)
-                    .map_err(|e| format!("Failed to encode reconstructed image: {:?}", e)).expect("Failed to encode reconstructed image");
-                let reconstructed_base64 = general_purpose::STANDARD.encode(&reconstructed_buffer);
-                    set_reconstructed_img.set(format!("data:image/png;base64,{}", reconstructed_base64));
-                })
-            }
+            //     let mut masked_fft_img = Array2::zeros((height, width));
+            //     // azip!((i in 0..height, j in 0..width) {
+            //     //     masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
+            //     // });
+            //     for i in 0..height {
+            //         for j in 0..width {
+            //             masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
+            //         }
+            //     }
+            //     let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
+                
+            //     // let reconstructed_img = zero_filled_recon(masked_fft_img);
+            //     let reconstructed_img = tgv::tgv_mri_reconstruction(
+            //         &masked_fft_img.view(), 
+            //         &mask.map(|x| *x as f32).view(), 
+            //         10.0, 
+            //         2.0, 
+            //         1.0, 
+            //         1.0/12.0, 
+            //         1.0/12.0, 
+            //         100);
+            //     let reconstructed_img = normalize_image_by_min_max(reconstructed_img);
+
+            //     let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
+            //     let mut reconstructed_buffer = Vec::new();
+            //     reconstructed_img.write_to(&mut Cursor::new(&mut reconstructed_buffer), ImageFormat::Png)
+            //         .map_err(|e| format!("Failed to encode reconstructed image: {:?}", e)).expect("Failed to encode reconstructed image");
+            //     let reconstructed_base64 = general_purpose::STANDARD.encode(&reconstructed_buffer);
+            //         set_reconstructed_img.set(format!("data:image/png;base64,{}", reconstructed_base64));
+            //     })
+            // }
         })
         .forget();
 
@@ -399,15 +408,16 @@ fn App() -> impl IntoView {
                         masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
                     }
                 }
-                let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
-                let reconstructed_img = fft::ifft2(&masked_fft_img.view());
-                // Convert to real
-                let reconstructed_img = reconstructed_img.map(|x| x.re);
-                // Normalize from 0 to 255
-    
-                let max_val = reconstructed_img.fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-                let min_val = reconstructed_img.fold(f64::INFINITY, |a, &b| a.min(b));
-                let reconstructed_img = reconstructed_img.map(|x| (x * 255.0 / (max_val - min_val)) as u8);
+                // let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
+                // let reconstructed_img = zero_filled_recon(masked_fft_img);
+                let reconstructed_img = tgv::tgv_mri_reconstruction(
+                    &masked_fft_img.view(), 
+                    &mask.map(|x| *x as f32).view(), 
+                    20.0, 
+                    2.0, 
+                    1.0, 
+                    0.1, 0.1, 50);
+                let reconstructed_img = normalize_image_by_min_max(reconstructed_img);
     
                 let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
                 let mut reconstructed_buffer = Vec::new();
@@ -448,54 +458,54 @@ fn App() -> impl IntoView {
             // let y = pe.client_y() as f64;
             draw_point(&ctx, x, y, erase_flag.get_untracked(), point_size.get_untracked());
 
-            if recon_interactivity_mode.get() == ReconInteractivityMode::OnDraw {
-                spawn_local(async move {
-                    // Get sampling mask from canvas
+            // if recon_interactivity_mode.get() == ReconInteractivityMode::OnDraw {
+            //     spawn_local(async move {
+            //         // Get sampling mask from canvas
         
-                let canvas = canvas_ref
-                .get()
-                .expect("canvas should be in the DOM");
-                let image_string = canvas.to_data_url_with_type("image/png").expect("Failed to convert canvas to image");
-                // log!("image_string: {:?}", image_string);
-                // let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
-                let image = convert_data_url_to_image(&image_string).expect("Failed to convert data URL to image");
-                let image_array: GrayImage = image.into_luma8();
-                let mask = image_array.as_ndarray2();
-                let mask = mask.map(|x| *x as f64);
-                let mask = mask.map(|x| if *x > 128.0 { 1.0 } else { 0.0 });
+            //     let canvas = canvas_ref
+            //     .get()
+            //     .expect("canvas should be in the DOM");
+            //     let image_string = canvas.to_data_url_with_type("image/png").expect("Failed to convert canvas to image");
+            //     // log!("image_string: {:?}", image_string);
+            //     // let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
+            //     let image = convert_data_url_to_image(&image_string).expect("Failed to convert data URL to image");
+            //     let image_array: GrayImage = image.into_luma8();
+            //     let mask = image_array.as_ndarray2();
+            //     let mask = mask.map(|x| *x as f64);
+            //     let mask = mask.map(|x| if *x > 128.0 { 1.0 } else { 0.0 });
     
-                let fft_vec = img_fft_vec.get();
-                let width = img_width.get() as usize;
-                let height = img_height.get() as usize;
-                let fft_img = Array2::from_shape_vec((height, width), fft_vec).unwrap();
+            //     let fft_vec = img_fft_vec.get();
+            //     let width = img_width.get() as usize;
+            //     let height = img_height.get() as usize;
+            //     let fft_img = Array2::from_shape_vec((height, width), fft_vec).unwrap();
     
-                let mut masked_fft_img = Array2::zeros((height, width));
-                // azip!((i in 0..height, j in 0..width) {
-                //     masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
-                // });
-                for i in 0..height {
-                    for j in 0..width {
-                        masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
-                    }
-                }
-                let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
-                let reconstructed_img = fft::ifft2(&masked_fft_img.view());
-                // Convert to real
-                let reconstructed_img = reconstructed_img.map(|x| x.re);
-                // Normalize from 0 to 255
+            //     let mut masked_fft_img = Array2::zeros((height, width));
+            //     // azip!((i in 0..height, j in 0..width) {
+            //     //     masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
+            //     // });
+            //     for i in 0..height {
+            //         for j in 0..width {
+            //             masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
+            //         }
+            //     }
+            //     let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
+            //     // let reconstructed_img = zero_filled_recon(masked_fft_img);
+            //     let reconstructed_img = tgv::tgv_mri_reconstruction(
+            //         &masked_fft_img.view(), 
+            //         &mask.map(|x| *x as f32).view(), 
+            //         10.0, 
+            //         2.0, 
+            //         1.0, 1.0/12.0, 1.0/12.0, 100);
+            //     let reconstructed_img = normalize_image_by_min_max(reconstructed_img);
     
-                let max_val = reconstructed_img.fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-                let min_val = reconstructed_img.fold(f64::INFINITY, |a, &b| a.min(b));
-                let reconstructed_img = reconstructed_img.map(|x| (x * 255.0 / (max_val - min_val)) as u8);
-    
-                let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
-                let mut reconstructed_buffer = Vec::new();
-                reconstructed_img.write_to(&mut Cursor::new(&mut reconstructed_buffer), ImageFormat::Png)
-                    .map_err(|e| format!("Failed to encode reconstructed image: {:?}", e)).expect("Failed to encode reconstructed image");
-                let reconstructed_base64 = general_purpose::STANDARD.encode(&reconstructed_buffer);
-                    set_reconstructed_img.set(format!("data:image/png;base64,{}", reconstructed_base64));
-                })
-            }
+            //     let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
+            //     let mut reconstructed_buffer = Vec::new();
+            //     reconstructed_img.write_to(&mut Cursor::new(&mut reconstructed_buffer), ImageFormat::Png)
+            //         .map_err(|e| format!("Failed to encode reconstructed image: {:?}", e)).expect("Failed to encode reconstructed image");
+            //     let reconstructed_base64 = general_purpose::STANDARD.encode(&reconstructed_buffer);
+            //         set_reconstructed_img.set(format!("data:image/png;base64,{}", reconstructed_base64));
+            //     })
+            // }
         })
         .forget();
     });
@@ -649,6 +659,21 @@ fn App() -> impl IntoView {
             </button>
         </div>
     }
+}
+
+fn zero_filled_recon(masked_fft_img: ndarray::ArrayBase<ndarray::OwnedRepr<Complex<f64>>, ndarray::Dim<[usize; 2]>>) -> Array2<f32> {
+    let reconstructed_img = fft::ifft2(&masked_fft_img.view());
+    // Convert to real
+    let reconstructed_img = reconstructed_img.map(|x| x.re as f32);
+    reconstructed_img
+}
+
+fn normalize_image_by_min_max(img: Array2<f32>) -> Array2<u8> {
+    let min_val = img.fold(f32::INFINITY, |a, &b| a.min(b));
+    img.map(|x| x - min_val);
+
+    let max_val = img.fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+    img.map(|x| (x * 255.0 / max_val) as u8)
 }
 
 

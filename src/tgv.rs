@@ -1,3 +1,4 @@
+use leptos::logging::log;
 use ndarray::{par_azip, s, Array2, Array3, ArrayView2, ArrayView3, Axis};
 use num_complex::{Complex, ComplexFloat};
 use rayon::prelude::*;
@@ -105,6 +106,15 @@ fn proj_q(q: &ArrayView3<f32>, alpha0: &f32) -> Array3<f32> {
     
 // }
 
+// enum ArrayInputType {
+//     Array2(Array2<f32>),
+//     Array3(Array3<f32>),
+// }
+
+// fn report_min_max(array: ArrayInputType) {
+//     log!("Min max: {}, {}", array.clone().into_iter().reduce(f32::min).unwrap(), array.clone().into_iter().reduce(f32::max).unwrap());
+// }
+
 pub fn tgv_mri_reconstruction(
     centered_kspace: &ArrayView2<Complex<f64>>,
     centered_mask: &ArrayView2<f32>,
@@ -136,18 +146,19 @@ pub fn tgv_mri_reconstruction(
     let mut u_bar = u.clone();
     let mut w_bar = w.clone();
 
-    for _ in 0..max_iter {
+    for i in 0..max_iter {
         let grad_u_bar = gradient(&u_bar.view());
         par_azip!((x in &mut p, &y in &grad_u_bar, &z in &w_bar) {
             *x += &sigma * (y - z);
         });
-        let p = proj_p(&p.view(), &alpha1);
+        let p = proj_p(&p.view(), &(&alpha1 * &lambda));
+        log!("Min max: {}, {}", p.clone().into_iter().reduce(f32::min).unwrap(), p.clone().into_iter().reduce(f32::max).unwrap());
 
         let sym_grad_w_bar = sym_gradient(&w_bar.view());
         par_azip!((x in &mut q, &y in &sym_grad_w_bar) {
             *x += &sigma * y;
         });
-        let q = proj_q(&q.view(), &alpha0);
+        let q = proj_q(&q.view(), &(&alpha0 * &lambda));
 
         // Primal updates
         let u_old = u.clone();
@@ -171,7 +182,13 @@ pub fn tgv_mri_reconstruction(
         let ifft_residual = ifft2(&ifft2shift(&residual.view()).view());
         let ifft_residual = Array2::<f32>::from_shape_vec((ny, nx), ifft_residual.into_iter().map(|x| x.re as f32).collect()).unwrap();
         par_azip!((x in &mut u, &y in &ifft_residual) {
-            *x += tau * lambda * y;
+            *x -= tau * y;
+        });
+
+        // Update w
+        let sym_div_q = sym_divergence(&q.view());
+        par_azip!((x in &mut w, &y in &p, &z in &sym_div_q) {
+            *x -= tau * (-y) * z;
         });
         
         // Extrapolation
@@ -181,11 +198,15 @@ pub fn tgv_mri_reconstruction(
         par_azip!((x in &mut w_bar, &y in &w, &z in &w_old) {
             *x = 2. * y - z;
         });
-        
-        
+
+        let total_residual: f64 = residual.map(|x| x.re.powi(2)).sum();
+        log!("Iteration: {}, Total residual: {}", i, total_residual);
+
+        log!("Min max: {}, {}", u.clone().into_iter().reduce(f32::min).unwrap(), u.clone().into_iter().reduce(f32::max).unwrap());
     }
     // Convert to real
     // let u = Array2::<f32>::from_shape_vec((ny, nx), u.into_iter().map(|x| x.re as f32).collect()).unwrap();
+    log!("Min max: {}, {}", u.clone().into_iter().reduce(f32::min).unwrap(), u.clone().into_iter().reduce(f32::max).unwrap());
     u
 }
 
