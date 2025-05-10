@@ -2,7 +2,7 @@
 
 This is a web demo for sampling and reconstruction of MRI images written in Rust using Leptos and compiled to WebAssembly with Trunk.
 
-Make sure to use latest trunk version: `>=v0.21.14`
+Requires the latest trunk version: `>=v0.21.14` as this bundles an updated `wasm-opt` package that resolves wasm parsing errors.
 
 The demo is deployed on Github Pages at https://apleynes.github.io/mri_recon_web_demo
 

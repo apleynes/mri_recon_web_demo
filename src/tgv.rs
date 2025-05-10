@@ -1,8 +1,14 @@
 use leptos::logging::log;
-use ndarray::{par_azip, s, Array2, Array3, ArrayView2, ArrayView3, Axis};
+use ndarray::{par_azip, s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, Axis, Zip};
 use num_complex::{Complex, ComplexFloat};
-use rayon::prelude::*;
+use rayon::{array, prelude::*};
 use crate::fft::*;
+
+
+fn roll1d(a: &ArrayView1<f32>, roll_amount: i32) -> Array1<f32> {
+    
+    ndarray::concatenate![Axis(0), a.slice(s![-roll_amount..]), a.slice(s![..-roll_amount])]
+}
 
 fn roll2d(a: &ArrayView2<f32>, axis: usize, roll_amount: i32) -> Array2<f32> {
     assert!(roll_amount.abs() > 0);
@@ -16,8 +22,33 @@ fn roll2d(a: &ArrayView2<f32>, axis: usize, roll_amount: i32) -> Array2<f32> {
 }
 
 fn gradient(u: &ArrayView2<f32>) -> Array3<f32> {
-    let grad_x = roll2d(&u.view(), 1, -1) - u;
-    let grad_y = roll2d(&u.view(), 0, -1) - u;
+    // let grad_x = roll2d(&u.view(), 1, -1) - u;
+
+    let mut grad_x = u.clone().to_owned();
+    grad_x.axis_iter_mut(Axis(0)) 
+        .into_par_iter()
+        .for_each(|mut row| {
+            let owned_row_view = row.view();
+            let shifted_row = roll1d(&owned_row_view, -1);
+            let diff = shifted_row - row.to_owned();
+            // let mut diff = diff.clone();
+            // row = diff.view_mut();
+            row.assign(&diff);
+        });
+    
+    // let grad_y = roll2d(&u.view(), 0, -1) - u;
+
+    let mut grad_y = u.clone().to_owned();
+    grad_y.axis_iter_mut(Axis(1))
+        .into_par_iter()
+        .for_each(|mut col| {
+            let owned_col_view = col.view();
+            let shifted_col = roll1d(&owned_col_view, -1);
+            let diff = shifted_col - col.to_owned();
+            // let mut diff = diff.clone();
+            // col = diff.view_mut();
+            col.assign(&diff);
+        });
 
     ndarray::stack![Axis(2), grad_x, grad_y]
 }
