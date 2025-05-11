@@ -398,7 +398,7 @@ pub fn tgv_mri_reconstruction(
         });
 
         let total_residual: f64 = residual.map(|x| x.re.powi(2)).sum();
-        // log!("Iteration: {}, Total residual: {}", i, total_residual);
+        // log!("Iteration: {}, Total residual: {:.3e}", i, total_residual);
 
         // log!("Min max: {}, {}", u.clone().into_iter().reduce(f32::min).unwrap(), u.clone().into_iter().reduce(f32::max).unwrap());
     }
