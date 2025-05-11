@@ -93,18 +93,65 @@ fn divergence(p: &ArrayView3<f32>) -> Array2<f32> {
 }
 
 fn sym_gradient(w: &ArrayView3<f32>) -> Array3<f32> {
-    // First diagonal: ∂x w_0
-    let first_diagonal = roll2d(&w.slice(s![.., .., 0]), 1, -1) 
-        - w.slice(s![.., .., 0]);
-    // Second diagonal: ∂y w_1
-    let second_diagonal = roll2d(&w.slice(s![.., .., 1]), 0, -1) 
-        - w.slice(s![.., .., 1]);
-    // Off-diagonals: 0.5*(∂y w_0 + ∂x w_1)
-    let tmp1 = roll2d(&w.slice(s![.., .., 0]), 0, -1) 
-        - w.slice(s![.., .., 0]);
-    let tmp2 = roll2d(&w.slice(s![.., .., 1]), 1, -1) 
-        - w.slice(s![.., .., 1]);
-    let off_diagonals = 0.5 * (tmp1 + tmp2);
+    // // First diagonal: ∂x w_0
+    // let first_diagonal = roll2d(&w.slice(s![.., .., 0]), 1, -1) 
+    //     - w.slice(s![.., .., 0]);
+    // // Second diagonal: ∂y w_1
+    // let second_diagonal = roll2d(&w.slice(s![.., .., 1]), 0, -1) 
+    //     - w.slice(s![.., .., 1]);
+    // // Off-diagonals: 0.5*(∂y w_0 + ∂x w_1)
+    // let tmp1 = roll2d(&w.slice(s![.., .., 0]), 0, -1) 
+    //     - w.slice(s![.., .., 0]);
+    // let tmp2 = roll2d(&w.slice(s![.., .., 1]), 1, -1) 
+    //     - w.slice(s![.., .., 1]);
+    // let off_diagonals = 0.5 * (tmp1 + tmp2);
+
+    // Calculate first diagonal in parallel
+    let mut first_diagonal = w.slice(s![.., .., 0]).clone().to_owned();
+    first_diagonal.axis_iter_mut(Axis(0))
+        .into_par_iter()
+        .for_each(|mut row| {
+            let owned_row_view = row.view();
+            let shifted_row = roll1d(&owned_row_view, -1);
+            let diff = shifted_row - row.to_owned();
+            row.assign(&diff);
+        });
+
+    // Calculate second diagonal in parallel
+    let mut second_diagonal = w.slice(s![.., .., 1]).clone().to_owned();
+    second_diagonal.axis_iter_mut(Axis(1))
+        .into_par_iter()
+        .for_each(|mut col| {
+            let owned_col_view = col.view();
+            let shifted_col = roll1d(&owned_col_view, -1);
+            let diff = shifted_col - col.to_owned();
+            col.assign(&diff);
+        });
+
+    // Calculate off-diagonals in parallel
+    let mut tmp1 = w.slice(s![.., .., 0]).clone().to_owned();
+    tmp1.axis_iter_mut(Axis(1))
+        .into_par_iter()
+        .for_each(|mut row| {
+            let owned_row_view = row.view();
+            let shifted_row = roll1d(&owned_row_view, -1);
+            let diff = shifted_row - row.to_owned();
+            row.assign(&diff);
+        });
+
+    let mut tmp2 = w.slice(s![.., .., 1]).clone().to_owned();
+    tmp2.axis_iter_mut(Axis(0))
+        .into_par_iter()
+        .for_each(|mut col| {
+            let owned_col_view = col.view();
+            let shifted_col = roll1d(&owned_col_view, -1);
+            let diff = shifted_col - col.to_owned();
+            col.assign(&diff);
+        });
+    let mut off_diagonals = tmp1;
+    par_azip!((x in &mut off_diagonals, &y in &tmp2) {
+        *x = 0.5 * (*x + y);
+    });
 
     ndarray::stack![Axis(2), first_diagonal, second_diagonal, off_diagonals]
 }
