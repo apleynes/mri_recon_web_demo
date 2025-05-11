@@ -219,31 +219,68 @@ fn sym_divergence(q: &ArrayView3<f32>) -> Array3<f32> {
 }
 
 fn proj_p(p: &ArrayView3<f32>, alpha1: &f32) -> Array3<f32> {
-    let norm = (p.slice(s![.., .., 0]).map(|x| x.powi(2)) 
-        + p.slice(s![.., .., 1]).map(|x| x.powi(2)))
-        .sqrt();
-    let factor = norm.map(|x| if (x / alpha1) > 1. { x / alpha1 } else { 1. });
+    // let norm = (p.slice(s![.., .., 0]).map(|x| x.powi(2)) 
+    //     + p.slice(s![.., .., 1]).map(|x| x.powi(2)))
+    //     .sqrt();
+    let norm = p.clone().to_owned().map_axis_mut(Axis(2), |slice| {
+        slice.powi(2).sum().sqrt()
+    });
+
+    let mut factor = norm;
+    factor.par_iter_mut().for_each(|x| {
+        if (*x / alpha1) > 1. {
+            *x = *x / alpha1;
+        } else {
+            *x = 1.0;
+        }
+    });
     let mut p_proj = p.to_owned();
     let mut slice1 = p_proj.slice_mut(s![.., .., 0]);
-    slice1 /= &factor;
+    // slice1 /= &factor;
+    par_azip!((x in &mut slice1, &y in &factor) {
+        *x /= y;
+    });
     let mut slice2 = p_proj.slice_mut(s![.., .., 1]);
-    slice2 /= &factor;
+    // slice2 /= &factor;
+    par_azip!((x in &mut slice2, &y in &factor) {
+        *x /= y;
+    });
     p_proj
 }
 
 fn proj_q(q: &ArrayView3<f32>, alpha0: &f32) -> Array3<f32> {
-    let norm = (q.slice(s![.., .., 0]).map(|x| x.powi(2)) 
-        + q.slice(s![.., .., 1]).map(|x| x.powi(2)) 
-        + q.slice(s![.., .., 2]).map(|x| x.powi(2)))
-        .sqrt();
-    let factor = norm.map(|x| if (x / alpha0) > 1. { x / alpha0 } else { 1. });
+    // let norm = (q.slice(s![.., .., 0]).map(|x| x.powi(2)) 
+    //     + q.slice(s![.., .., 1]).map(|x| x.powi(2)) 
+    //     + q.slice(s![.., .., 2]).map(|x| x.powi(2)))
+    //     .sqrt();
+    let norm = q.clone().to_owned().map_axis_mut(Axis(2), |slice| {
+        slice.powi(2).sum().sqrt()
+    });
+
+    let mut factor = norm;
+    factor.par_iter_mut().for_each(|x| {
+        if (*x / alpha0) > 1. {
+            *x = *x / alpha0;
+        } else {
+            *x = 1.0;
+        }
+    });
     let mut q_proj = q.to_owned();
     let mut slice1 = q_proj.slice_mut(s![.., .., 0]);
-    slice1 /= &factor;
+    // slice1 /= &factor;
+    par_azip!((x in &mut slice1, &y in &factor) {
+        *x /= y;
+    });
     let mut slice2 = q_proj.slice_mut(s![.., .., 1]);
-    slice2 /= &factor;
+    // slice2 /= &factor;
+    par_azip!((x in &mut slice2, &y in &factor) {
+        *x /= y;
+    });
     let mut slice3 = q_proj.slice_mut(s![.., .., 2]);
-    slice3 /= &factor;
+    // slice3 /= &factor;
+    par_azip!((x in &mut slice3, &y in &factor) {
+        *x /= y;
+    });
     q_proj
 }
 
