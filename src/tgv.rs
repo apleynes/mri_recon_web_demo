@@ -157,18 +157,64 @@ fn sym_gradient(w: &ArrayView3<f32>) -> Array3<f32> {
 }
 
 fn sym_divergence(q: &ArrayView3<f32>) -> Array3<f32> {
-    // First component: ∂x q_0 - ∂y q_2
-    let first_term = -(q.slice(s![.., .., 0]).to_owned() 
-        - roll2d(&q.slice(s![.., .., 0]), 1, 1));
-    let second_term = -0.5 * (q.slice(s![.., .., 2]).to_owned() 
-        - roll2d(&q.slice(s![.., .., 2]), 0, 1));
-    let first_component = first_term + second_term;
-    // Second component: ∂y q_1 - ∂x q_2
-    let first_term = -(q.slice(s![.., .., 1]).to_owned() 
-        - roll2d(&q.slice(s![.., .., 1]), 0, 1));
-    let second_term = -0.5 * (q.slice(s![.., .., 2]).to_owned() 
-        - roll2d(&q.slice(s![.., .., 2]), 1, 1));
-    let second_component = first_term + second_term;
+    // // First component: ∂x q_0 - ∂y q_2
+    // let first_term = -(q.slice(s![.., .., 0]).to_owned() 
+    //     - roll2d(&q.slice(s![.., .., 0]), 1, 1));
+    // let second_term = -0.5 * (q.slice(s![.., .., 2]).to_owned() 
+    //     - roll2d(&q.slice(s![.., .., 2]), 0, 1));
+    // let first_component = first_term + second_term;
+    // // Second component: ∂y q_1 - ∂x q_2
+    // let first_term = -(q.slice(s![.., .., 1]).to_owned() 
+    //     - roll2d(&q.slice(s![.., .., 1]), 0, 1));
+    // let second_term = -0.5 * (q.slice(s![.., .., 2]).to_owned() 
+    //     - roll2d(&q.slice(s![.., .., 2]), 1, 1));
+    // let second_component = first_term + second_term;
+
+
+    let mut first_component = q.slice(s![.., .., 0]).clone().to_owned();
+    first_component.axis_iter_mut(Axis(0))
+        .into_par_iter()
+        .for_each(|mut row| {
+            let owned_row_view = row.view();
+            let shifted_row = roll1d(&owned_row_view, 1);
+            let diff = -(row.to_owned() - shifted_row);
+            row.assign(&diff);
+        });
+    let mut second_term = q.slice(s![.., .., 2]).clone().to_owned();
+    second_term.axis_iter_mut(Axis(1))
+        .into_par_iter()
+        .for_each(|mut col| {
+            let owned_col_view = col.view();
+            let shifted_col = roll1d(&owned_col_view, 1);
+            let diff = -0.5 * (col.to_owned() - shifted_col);
+            col.assign(&diff);
+        });
+    par_azip!((x in &mut first_component, &y in &second_term) {
+        *x += y;
+    });
+
+    let mut second_component = q.slice(s![.., .., 1]).clone().to_owned();
+    second_component.axis_iter_mut(Axis(1))
+        .into_par_iter()
+        .for_each(|mut col| {
+            let owned_col_view = col.view();
+            let shifted_col = roll1d(&owned_col_view, 1);
+            let diff = -(col.to_owned() - shifted_col);
+            col.assign(&diff);
+        });
+    let mut second_term = q.slice(s![.., .., 2]).clone().to_owned();
+    second_term.axis_iter_mut(Axis(0))
+        .into_par_iter()
+        .for_each(|mut row| {
+            let owned_row_view = row.view();
+            let shifted_row = roll1d(&owned_row_view, 1);
+            let diff = -0.5 * (row.to_owned() - shifted_row);
+            row.assign(&diff);
+        });
+    par_azip!((x in &mut second_component, &y in &second_term) {
+        *x += y;
+    });
+
     ndarray::stack![Axis(2), first_component, second_component]
 }
 
