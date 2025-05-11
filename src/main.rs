@@ -417,7 +417,7 @@ fn App() -> impl IntoView {
                     20.0, 
                     2.0, 
                     1.0, 
-                    0.125, 0.125, 20);
+                    1.0/(12.0_f32).sqrt(), 1.0/(12.0_f32).sqrt(), 10);
                 let reconstructed_img = normalize_image_by_min_max(reconstructed_img);
     
                 let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
