@@ -344,6 +344,7 @@ pub fn tgv_mri_reconstruction(
     let mut u_bar = u.clone();
     let mut w_bar = w.clone();
 
+    let t: f32 = 1.0;  // Adaptive momentum
     for i in 0..max_iter {
         let grad_u_bar = gradient(&u_bar.view());
         par_azip!((x in &mut p, &y in &grad_u_bar, &z in &w_bar) {
@@ -390,15 +391,22 @@ pub fn tgv_mri_reconstruction(
         });
         
         // Extrapolation
+        // Update momentum
+        let t_old = t;
+        let t = (1. + (1. + 4. * t_old.powi(2)).sqrt()) / 2.0;
+        let theta = (1. - t_old) / t;
         par_azip!((x in &mut u_bar, &y in &u, &z in &u_old) {
-            *x = 2. * y - z;
+            // *x = 2. * y - z;
+            *x = y + theta * (y - z);
         });
         par_azip!((x in &mut w_bar, &y in &w, &z in &w_old) {
-            *x = 2. * y - z;
+            // *x = 2. * y - z;
+            *x = y + theta * (y - z);
         });
 
         let total_residual: f64 = residual.map(|x| x.re.powi(2)).sum();
         // log!("Iteration: {}, Total residual: {:.3e}", i, total_residual);
+
 
         // log!("Min max: {}, {}", u.clone().into_iter().reduce(f32::min).unwrap(), u.clone().into_iter().reduce(f32::max).unwrap());
     }
