@@ -1,3 +1,5 @@
+use web_time::Instant;
+
 use leptos::logging::log;
 use ndarray::{par_azip, s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, Axis, Zip};
 use num_complex::{Complex, ComplexFloat};
@@ -317,6 +319,10 @@ pub fn tgv_mri_reconstruction(
     sigma: f32,
     max_iter: usize,
 ) -> Array2<f32> {
+
+    // Start timing
+    let start_time = Instant::now();
+
     let (ny, nx) = centered_kspace.dim();
     // Initialize with zero-filled reconstruction
     let mut masked_kspace = Array2::<Complex<f64>>::zeros((ny, nx));
@@ -399,6 +405,9 @@ pub fn tgv_mri_reconstruction(
     // Convert to real
     // let u = Array2::<f32>::from_shape_vec((ny, nx), u.into_iter().map(|x| x.re as f32).collect()).unwrap();
     // log!("Min max: {}, {}", u.clone().into_iter().reduce(f32::min).unwrap(), u.clone().into_iter().reduce(f32::max).unwrap());
+
+    let end_time = Instant::now();
+    log!("Time taken: {:?}", end_time.duration_since(start_time));
     u
 }
 
