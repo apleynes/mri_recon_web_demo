@@ -54,11 +54,42 @@ fn gradient(u: &ArrayView2<f32>) -> Array3<f32> {
 }
 
 fn divergence(p: &ArrayView3<f32>) -> Array2<f32> {
-    let first_term = p.slice(s![.., .., 0]).to_owned() 
-        - roll2d(&p.slice(s![.., .., 0]), 1, 1);
-    let second_term = p.slice(s![.., .., 1]).to_owned() 
-    - roll2d(&p.slice(s![.., .., 1]), 0, 1);
-    -(first_term + second_term)
+    // let first_term = p.slice(s![.., .., 0]).to_owned() 
+    //     - roll2d(&p.slice(s![.., .., 0]), 1, 1);
+
+    // Calculate first term in parallel
+    let mut first_term = p.slice(s![.., .., 0]).clone().to_owned();
+    first_term.axis_iter_mut(Axis(0))
+        .into_par_iter()
+        .for_each(|mut row| {
+            let owned_row_view = row.view();
+            let shifted_row = roll1d(&owned_row_view, 1);
+            let diff = row.to_owned() - shifted_row;
+            row.assign(&diff);
+        });
+
+
+    // let second_term = p.slice(s![.., .., 1]).to_owned() 
+    // - roll2d(&p.slice(s![.., .., 1]), 0, 1);
+
+    // Calculate second term in parallel
+    let mut second_term = p.slice(s![.., .., 1]).clone().to_owned();
+    second_term.axis_iter_mut(Axis(1))
+        .into_par_iter()
+        .for_each(|mut col| {
+            let owned_col_view = col.view();
+            let shifted_col = roll1d(&owned_col_view, 1);
+            let diff = col.to_owned() - shifted_col;
+            col.assign(&diff);
+        });
+
+    // -(first_term + second_term)
+    // Calculate output
+    par_azip!((x in &mut first_term, &y in &second_term) {
+        *x = -(*x + y);
+    });
+    first_term
+
 }
 
 fn sym_gradient(w: &ArrayView3<f32>) -> Array3<f32> {
