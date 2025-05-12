@@ -380,53 +380,7 @@ fn App() -> impl IntoView {
             drawing_flag_up.set(false);
 
             if recon_interactivity_mode.get() == ReconInteractivityMode::OnMouseUp {
-                spawn_local(async move {
-                    // Get sampling mask from canvas
-        
-                let canvas = canvas_ref
-                .get()
-                .expect("canvas should be in the DOM");
-                let image_string = canvas.to_data_url_with_type("image/png").expect("Failed to convert canvas to image");
-                // log!("image_string: {:?}", image_string);
-                // let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
-                let image = convert_data_url_to_image(&image_string).expect("Failed to convert data URL to image");
-                let image_array: GrayImage = image.into_luma8();
-                let mask = image_array.as_ndarray2();
-                let mask = mask.map(|x| *x as f64);
-                let mask = mask.map(|x| if *x > 128.0 { 1.0 } else { 0.0 });
-    
-                let fft_vec = img_fft_vec.get();
-                let width = img_width.get() as usize;
-                let height = img_height.get() as usize;
-                let fft_img = Array2::from_shape_vec((height, width), fft_vec).unwrap();
-    
-                let mut masked_fft_img = Array2::zeros((height, width));
-                // azip!((i in 0..height, j in 0..width) {
-                //     masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
-                // });
-                for i in 0..height {
-                    for j in 0..width {
-                        masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
-                    }
-                }
-                // let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
-                // let reconstructed_img = zero_filled_recon(masked_fft_img);
-                let reconstructed_img = tgv::tgv_mri_reconstruction(
-                    &masked_fft_img.view(), 
-                    &mask.map(|x| *x as f32).view(), 
-                    20.0, 
-                    2.0, 
-                    1.0, 
-                    1.0/(12.0_f32).sqrt(), 1.0/(12.0_f32).sqrt(), 10);
-                let reconstructed_img = normalize_image_by_min_max(reconstructed_img);
-    
-                let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
-                let mut reconstructed_buffer = Vec::new();
-                reconstructed_img.write_to(&mut Cursor::new(&mut reconstructed_buffer), ImageFormat::Png)
-                    .map_err(|e| format!("Failed to encode reconstructed image: {:?}", e)).expect("Failed to encode reconstructed image");
-                let reconstructed_base64 = general_purpose::STANDARD.encode(&reconstructed_buffer);
-                    set_reconstructed_img.set(format!("data:image/png;base64,{}", reconstructed_base64));
-                })
+                read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img);
             }
 
         })
@@ -660,6 +614,62 @@ fn App() -> impl IntoView {
             </button>
         </div>
     }
+}
+
+fn read_canvas_and_reconstruct(
+    canvas_ref: NodeRef<Canvas>, 
+    img_fft_vec: ReadSignal<Vec<Complex<f64>>>,
+    img_width: ReadSignal<u32>,
+    img_height: ReadSignal<u32>,
+    set_reconstructed_img: WriteSignal<String>,
+) {
+    spawn_local(async move {
+        // Get sampling mask from canvas
+        
+    let canvas = canvas_ref
+    .get()
+    .expect("canvas should be in the DOM");
+    let image_string = canvas.to_data_url_with_type("image/png").expect("Failed to convert canvas to image");
+    // log!("image_string: {:?}", image_string);
+    // let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
+    let image = convert_data_url_to_image(&image_string).expect("Failed to convert data URL to image");
+    let image_array: GrayImage = image.into_luma8();
+    let mask = image_array.as_ndarray2();
+    let mask = mask.map(|x| *x as f64);
+    let mask = mask.map(|x| if *x > 128.0 { 1.0 } else { 0.0 });
+    
+    let fft_vec = img_fft_vec.get();
+    let width = img_width.get() as usize;
+    let height = img_height.get() as usize;
+    let fft_img = Array2::from_shape_vec((height, width), fft_vec).unwrap();
+    
+    let mut masked_fft_img = Array2::zeros((height, width));
+    // azip!((i in 0..height, j in 0..width) {
+    //     masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
+    // });
+    for i in 0..height {
+        for j in 0..width {
+            masked_fft_img[[i, j]] = fft_img[[i, j]] * mask[[i, j]];
+        }
+    }
+    // let masked_fft_img = fft::ifft2shift(&masked_fft_img.view());
+    // let reconstructed_img = zero_filled_recon(masked_fft_img);
+    let reconstructed_img = tgv::tgv_mri_reconstruction(
+        &masked_fft_img.view(), 
+        &mask.map(|x| *x as f32).view(), 
+        20.0, 
+        2.0, 
+        1.0, 
+        1.0/(12.0_f32).sqrt(), 1.0/(12.0_f32).sqrt(), 5);
+    let reconstructed_img = normalize_image_by_min_max(reconstructed_img);
+    
+    let reconstructed_img = GrayImage::from_raw(width as u32, height as u32, reconstructed_img.into_iter().collect()).unwrap();
+    let mut reconstructed_buffer = Vec::new();
+    reconstructed_img.write_to(&mut Cursor::new(&mut reconstructed_buffer), ImageFormat::Png)
+        .map_err(|e| format!("Failed to encode reconstructed image: {:?}", e)).expect("Failed to encode reconstructed image");
+    let reconstructed_base64 = general_purpose::STANDARD.encode(&reconstructed_buffer);
+        set_reconstructed_img.set(format!("data:image/png;base64,{}", reconstructed_base64));
+    })
 }
 
 fn zero_filled_recon(masked_fft_img: ndarray::ArrayBase<ndarray::OwnedRepr<Complex<f64>>, ndarray::Dim<[usize; 2]>>) -> Array2<f32> {
