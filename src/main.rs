@@ -249,7 +249,13 @@ fn App() -> impl IntoView {
     let (tgv2_iter, set_tgv2_iter) = signal(5 as usize);
     
     let reconstruct_img_and_set_reconstructed_img = move |_| {
-        read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled, ReconParams { tgv2_lam: tgv2_lam.get(), tgv2_iter: tgv2_iter.get() });
+        if zero_filled_recon_enabled.get() {
+            read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled, ReconParams { tgv2_lam: tgv2_lam.get(), tgv2_iter: tgv2_iter.get() });
+        }
+        if compressed_sensing_recon_enabled.get() {
+            read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_compressed_sensing, ReconMode::TGV2, ReconParams { tgv2_lam: tgv2_lam.get(), tgv2_iter: tgv2_iter.get() });
+        }
+
     };
 
 
