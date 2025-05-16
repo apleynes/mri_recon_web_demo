@@ -215,6 +215,11 @@ enum ReconMode {
     TGV2,
 }
 
+struct ReconParams {
+    tgv2_lam: f32,
+    tgv2_iter: usize,
+}
+
 fn App() -> impl IntoView {
 
     // signal: true = erase, false = draw
@@ -238,9 +243,13 @@ fn App() -> impl IntoView {
     let (recon_interactivity_mode, set_recon_interactivity_mode) = signal(ReconInteractivityMode::OnDraw);
     let (zero_filled_recon_enabled, set_zero_filled_recon_enabled) = signal(true);
     let (compressed_sensing_recon_enabled, set_compressed_sensing_recon_enabled) = signal(false);
+
+    // TGV2 parameters
+    let (tgv2_lam, set_tgv2_lam) = signal(1.0);
+    let (tgv2_iter, set_tgv2_iter) = signal(5 as usize);
     
     let reconstruct_img_and_set_reconstructed_img = move |_| {
-        read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled);
+        read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled, ReconParams { tgv2_lam: tgv2_lam.get(), tgv2_iter: tgv2_iter.get() });
     };
 
 
@@ -279,10 +288,10 @@ fn App() -> impl IntoView {
             let recon_interactivity_mode: ReconInteractivityMode = recon_interactivity_mode.get_untracked();
             if recon_interactivity_mode == ReconInteractivityMode::OnDraw {
                 if zero_filled_recon_enabled.get() {
-                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled);
+                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled, ReconParams { tgv2_lam: tgv2_lam.get(), tgv2_iter: tgv2_iter.get() });
                 }
                 if compressed_sensing_recon_enabled.get() {
-                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_compressed_sensing, ReconMode::TGV2);
+                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_compressed_sensing, ReconMode::TGV2, ReconParams { tgv2_lam: tgv2_lam.get(), tgv2_iter: tgv2_iter.get() });
                 }
             }
         })
@@ -295,10 +304,10 @@ fn App() -> impl IntoView {
 
             if recon_interactivity_mode.get() == ReconInteractivityMode::OnMouseUp {
                 if zero_filled_recon_enabled.get() {
-                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled);
+                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled, ReconParams { tgv2_lam: tgv2_lam.get(), tgv2_iter: tgv2_iter.get() });
                 }
                 if compressed_sensing_recon_enabled.get() {
-                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_compressed_sensing, ReconMode::TGV2);
+                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_compressed_sensing, ReconMode::TGV2, ReconParams { tgv2_lam: tgv2_lam.get(), tgv2_iter: tgv2_iter.get() });
                 }
             }
 
@@ -334,10 +343,10 @@ fn App() -> impl IntoView {
 
             if recon_interactivity_mode.get() == ReconInteractivityMode::OnDraw {
                 if zero_filled_recon_enabled.get() {
-                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled);
+                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled, ReconParams { tgv2_lam: tgv2_lam.get(), tgv2_iter: tgv2_iter.get() });
                 }
                 if compressed_sensing_recon_enabled.get() {
-                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_compressed_sensing, ReconMode::TGV2);
+                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_compressed_sensing, ReconMode::TGV2, ReconParams { tgv2_lam: tgv2_lam.get(), tgv2_iter: tgv2_iter.get() });
                 }
             }
         })
@@ -434,6 +443,78 @@ fn App() -> impl IntoView {
                     <div class="image-box">
                         <h2>"Compressed sensing (TGV2) Reconstructed Image"</h2>
                         <img src=reconstructed_img_compressed_sensing alt="Reconstructed Image" />
+                        // Parameter control for the compressed sensing reconstruction
+                        <p>Regularization Strength (lambda)</p>
+                        // Slider: -1e-12 to 1e3 but in log scale
+                        <input
+                          type="range"
+                          min="-6"
+                          max="6"
+                          step="0.01"
+                          // Bind slider thumb to param
+                          prop:value=move || tgv2_lam.get().to_string()  // Let the slider cursor go from min to max
+                          // On input, parse and update `param`
+                          on:input=move |ev| {
+                            let v = event_target_value(&ev)
+                                      .parse::<f32>()
+                                      .unwrap_or(tgv2_lam.get());
+                            set_tgv2_lam.set(v);
+                            read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_compressed_sensing, ReconMode::TGV2, ReconParams { tgv2_lam: v, tgv2_iter: tgv2_iter.get() });
+                          }
+                        />
+                        // Number input: shows same param but in linear scale
+                        <input
+                          type="number"
+                          step="1e-3"
+                          min="1e-6"
+                          max="1e6"
+                          prop:value=move || 10.0_f32.powf(tgv2_lam.get()).to_string()  // Show hte displayed value in log scale
+                        //   On input, parse and update `param`
+                          on:input=move |ev| {
+                            let v = event_target_value(&ev)
+                                      .parse::<f32>()
+                                      .map(|x| x.log10())
+                                      .unwrap_or(tgv2_lam.get());  // Int inputted, store it as log scale
+                            set_tgv2_lam.set(v);
+                            read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_compressed_sensing, ReconMode::TGV2, ReconParams { tgv2_lam: v, tgv2_iter: tgv2_iter.get() });
+                          }
+                          style="width: 4em;"
+                        />
+                        <p>Number of iterations</p>
+                        // Slider: -1e-12 to 1e3 but in log scale
+                        <input
+                          type="range"
+                          min="1"
+                          max="30"
+                          step="1"
+                          // Bind slider thumb to param
+                          prop:value=move || tgv2_iter.get().to_string()  // Let the slider cursor go from min to max
+                          // On input, parse and update `param`
+                          on:input=move |ev| {
+                            let v = event_target_value(&ev)
+                                      .parse::<usize>()
+                                      .unwrap_or(tgv2_iter.get());
+                                    // tgv_lam.set(v);
+                            set_tgv2_iter.set(v);
+                          }
+                        />
+                        // Number input: shows same param but in linear scale
+                        <input
+                          type="number"
+                          step="1"
+                          min="1"
+                          max="30"
+                          prop:value=move || tgv2_iter.get().to_string()  // Show hte displayed value in log scale
+                        //   On input, parse and update `param`
+                          on:input=move |ev| {
+                            let v = event_target_value(&ev)
+                                      .parse::<usize>()
+                                      .unwrap_or(tgv2_iter.get());  // Int inputted, store it as log scale
+                            // param_set.set(v);
+                            set_tgv2_iter.set(v);
+                          }
+                          style="width: 4em;"
+                        />
                     </div>
                 </Show>
             </div>
@@ -447,11 +528,21 @@ fn App() -> impl IntoView {
             <br />
             <p>Reconstruction modes:</p>
             <input type="checkbox" name="zero_filled_recon_enabled" 
-                on:change=move |evt| set_zero_filled_recon_enabled.set(event_target_checked(&evt)) 
+                on:change=move |evt| {
+                    set_zero_filled_recon_enabled.set(event_target_checked(&evt));
+                    if zero_filled_recon_enabled.get() {
+                        read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled, ReconParams { tgv2_lam: tgv2_lam.get(), tgv2_iter: tgv2_iter.get() });
+                    }
+                }
                 checked=move || zero_filled_recon_enabled.get() />
             <label for="zero_filled_recon_enabled">"Basic (Zero-filled)"</label>
             <input type="checkbox" name="compressed_sensing_recon_enabled" 
-                on:change=move |evt| set_compressed_sensing_recon_enabled.set(event_target_checked(&evt)) 
+                on:change=move |evt| {
+                    set_compressed_sensing_recon_enabled.set(event_target_checked(&evt));
+                    if compressed_sensing_recon_enabled.get() {
+                        read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_compressed_sensing, ReconMode::TGV2, ReconParams { tgv2_lam: tgv2_lam.get(), tgv2_iter: tgv2_iter.get() });
+                    }
+                }
                 checked=move || compressed_sensing_recon_enabled.get() />
             <label for="compressed_sensing_recon_enabled">"Compressed sensing (TGV2)"</label>
             <br />
@@ -520,6 +611,7 @@ fn read_canvas_and_reconstruct(
     img_height: ReadSignal<u32>,
     set_reconstructed_img: WriteSignal<String>,
     recon_mode: ReconMode,
+    recon_params: ReconParams,
 ) {
     spawn_local(async move {
         // Get sampling mask from canvas
@@ -555,10 +647,10 @@ fn read_canvas_and_reconstruct(
         ReconMode::TGV2 => tgv::tgv_mri_reconstruction(
             &masked_fft_img.view(), 
             &mask.map(|x| *x as f32).view(), 
-            20.0, 
-            2.0, 
+            recon_params.tgv2_lam, 
             1.0, 
-            1.0/(12.0_f32).sqrt(), 1.0/(12.0_f32).sqrt(), 5),
+            2.0, 
+            1.0/(12.0_f32).sqrt(), 1.0/(12.0_f32).sqrt(), recon_params.tgv2_iter as usize),
     };
     let reconstructed_img = normalize_image_by_min_max(reconstructed_img);
     

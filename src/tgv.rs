@@ -350,14 +350,14 @@ pub fn tgv_mri_reconstruction(
         par_azip!((x in &mut p, &y in &grad_u_bar, &z in &w_bar) {
             *x += &sigma * (y - z);
         });
-        let p = proj_p(&p.view(), &(&alpha1 * &lambda));
+        let p = proj_p(&p.view(), &(&alpha0));
         // log!("Min max: {}, {}", p.clone().into_iter().reduce(f32::min).unwrap(), p.clone().into_iter().reduce(f32::max).unwrap());
 
         let sym_grad_w_bar = sym_gradient(&w_bar.view());
         par_azip!((x in &mut q, &y in &sym_grad_w_bar) {
-            *x += &sigma * y;
+            *x += &sigma * &lambda * y;
         });
-        let q = proj_q(&q.view(), &(&alpha0 * &lambda));
+        let q = proj_q(&q.view(), &(&alpha1));
 
         // Primal updates
         let u_old = u.clone();
@@ -366,7 +366,7 @@ pub fn tgv_mri_reconstruction(
         // Update u: TGV + data fidelity
         let div_p = divergence(&p.view());
         par_azip!((x in &mut u, &y in &div_p) {
-            *x -= tau * y;
+            *x -= tau * &lambda * y;
         });
 
         // Data fidelity term
