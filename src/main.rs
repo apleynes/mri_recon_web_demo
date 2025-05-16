@@ -227,7 +227,8 @@ fn App() -> impl IntoView {
     let (img_height, set_img_height) = signal(32);
 
     let (img_fft_vec, set_img_fft_vec) = signal(Array2::<Complex<f64>>::zeros((32, 32)).into_raw_vec_and_offset().0);
-    let (reconstructed_img, set_reconstructed_img) = signal(String::new());
+    let (reconstructed_img_zero_filled, set_reconstructed_img_zero_filled) = signal(String::new());
+    let (reconstructed_img_compressed_sensing, set_reconstructed_img_compressed_sensing) = signal(String::new());
 
     
     let file_input: NodeRef<Input> = NodeRef::new();
@@ -235,10 +236,11 @@ fn App() -> impl IntoView {
     let (processed_img_src, set_processed_img_src) = signal(String::new());
 
     let (recon_interactivity_mode, set_recon_interactivity_mode) = signal(ReconInteractivityMode::OnDraw);
-    let (recon_mode, set_recon_mode) = signal(ReconMode::ZeroFilled);
+    let (zero_filled_recon_enabled, set_zero_filled_recon_enabled) = signal(true);
+    let (compressed_sensing_recon_enabled, set_compressed_sensing_recon_enabled) = signal(false);
     
     let reconstruct_img_and_set_reconstructed_img = move |_| {
-        read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img, ReconMode::ZeroFilled);
+        read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled);
     };
 
 
@@ -276,7 +278,12 @@ fn App() -> impl IntoView {
 
             let recon_interactivity_mode: ReconInteractivityMode = recon_interactivity_mode.get_untracked();
             if recon_interactivity_mode == ReconInteractivityMode::OnDraw {
-                read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img, ReconMode::ZeroFilled);
+                if zero_filled_recon_enabled.get() {
+                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled);
+                }
+                if compressed_sensing_recon_enabled.get() {
+                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_compressed_sensing, ReconMode::TGV2);
+                }
             }
         })
         .forget();
@@ -287,7 +294,12 @@ fn App() -> impl IntoView {
             drawing_flag_up.set(false);
 
             if recon_interactivity_mode.get() == ReconInteractivityMode::OnMouseUp {
-                read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img, ReconMode::TGV2);
+                if zero_filled_recon_enabled.get() {
+                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled);
+                }
+                if compressed_sensing_recon_enabled.get() {
+                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_compressed_sensing, ReconMode::TGV2);
+                }
             }
 
         })
@@ -321,7 +333,12 @@ fn App() -> impl IntoView {
             draw_point(&ctx, x, y, erase_flag.get_untracked(), point_size.get_untracked());
 
             if recon_interactivity_mode.get() == ReconInteractivityMode::OnDraw {
-                read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img, ReconMode::ZeroFilled);
+                if zero_filled_recon_enabled.get() {
+                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_zero_filled, ReconMode::ZeroFilled);
+                }
+                if compressed_sensing_recon_enabled.get() {
+                    read_canvas_and_reconstruct(canvas_ref, img_fft_vec, img_width, img_height, set_reconstructed_img_compressed_sensing, ReconMode::TGV2);
+                }
             }
         })
         .forget();
@@ -372,7 +389,8 @@ fn App() -> impl IntoView {
             reconstructed_img.write_to(&mut Cursor::new(&mut reconstructed_buffer), ImageFormat::Png)
                 .map_err(|e| format!("Failed to encode reconstructed image: {:?}", e)).expect("Failed to encode reconstructed image");
             let reconstructed_base64 = general_purpose::STANDARD.encode(&reconstructed_buffer);
-            set_reconstructed_img.set(format!("data:image/png;base64,{}", reconstructed_base64));
+            set_reconstructed_img_zero_filled.set(format!("data:image/png;base64,{}", reconstructed_base64));
+            set_reconstructed_img_compressed_sensing.set(format!("data:image/png;base64,{}", reconstructed_base64));
         })
     };
 
@@ -405,10 +423,17 @@ fn App() -> impl IntoView {
                     <AdaptiveCanvas img_width=img_width img_height=img_height canvas_ref=canvas_ref />
                 </div>
 
-                <Show when=move || !reconstructed_img.get().is_empty() && !original_img_src.get().is_empty()>
+                <Show when=move || !reconstructed_img_zero_filled.get().is_empty() && !original_img_src.get().is_empty() && zero_filled_recon_enabled.get()>
                     <div class="image-box">
-                        <h2>"Zero-filled Reconstructed Image"</h2>
-                        <img src=reconstructed_img alt="Reconstructed Image" />
+                        <h2>"Basic (Zero-filled) Reconstructed Image"</h2>
+                        <img src=reconstructed_img_zero_filled alt="Reconstructed Image" />
+                    </div>
+                </Show>
+
+                <Show when=move || !reconstructed_img_compressed_sensing.get().is_empty() && !original_img_src.get().is_empty() && compressed_sensing_recon_enabled.get()>
+                    <div class="image-box">
+                        <h2>"Compressed sensing (TGV2) Reconstructed Image"</h2>
+                        <img src=reconstructed_img_compressed_sensing alt="Reconstructed Image" />
                     </div>
                 </Show>
             </div>
@@ -419,6 +444,16 @@ fn App() -> impl IntoView {
             <label for="on_mouse_up">"On mouse up"</label>
             <input type="radio" name="recon_interactivity_mode" value="on_draw" on:change=move |_| set_recon_interactivity_mode.set(ReconInteractivityMode::OnDraw) checked=move || recon_interactivity_mode.get() == ReconInteractivityMode::OnDraw />
             <label for="on_draw">"On draw"</label>
+            <br />
+            <p>Reconstruction modes:</p>
+            <input type="checkbox" name="zero_filled_recon_enabled" 
+                on:change=move |evt| set_zero_filled_recon_enabled.set(event_target_checked(&evt)) 
+                checked=move || zero_filled_recon_enabled.get() />
+            <label for="zero_filled_recon_enabled">"Basic (Zero-filled)"</label>
+            <input type="checkbox" name="compressed_sensing_recon_enabled" 
+                on:change=move |evt| set_compressed_sensing_recon_enabled.set(event_target_checked(&evt)) 
+                checked=move || compressed_sensing_recon_enabled.get() />
+            <label for="compressed_sensing_recon_enabled">"Compressed sensing (TGV2)"</label>
             <br />
             <button on:click=move |_| set_erase.set(false)>
                 "Draw"
@@ -442,34 +477,34 @@ fn App() -> impl IntoView {
                 "Clear"
             </button>
             <br />
-            <button on:click=move |_| {
-                let canvas = canvas_ref
-                    .get()
-                    .expect("canvas should be in the DOM");
-                let image_string = canvas.to_data_url_with_type("image/png").expect("Failed to convert canvas to image");
-                // let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
-                // let image_array = image.as_luma8().unwrap();
+            // <button on:click=move |_| {
+            //     let canvas = canvas_ref
+            //         .get()
+            //         .expect("canvas should be in the DOM");
+            //     let image_string = canvas.to_data_url_with_type("image/png").expect("Failed to convert canvas to image");
+            //     // let image = image::load_from_memory(&image_string.as_bytes()).expect("Failed to load image");
+            //     // let image_array = image.as_luma8().unwrap();
 
-                let window = web_sys::window().unwrap();
-                let document = window.document().unwrap();
-                let a = document
-                    .create_element("a")
-                    .unwrap()
-                    .dyn_into::<web_sys::HtmlAnchorElement>()
-                    .unwrap();
-                a.set_href(&image_string);
-                a.set_download("canvas.png");
-                // // hide the link
-                // a.set_property("display", "none").unwrap();
-                // insert into DOM, trigger download, then remove
-                let body = document.body().unwrap();
-                body.append_child(&a).unwrap();
-                a.click();
-                body.remove_child(&a).unwrap();
+            //     let window = web_sys::window().unwrap();
+            //     let document = window.document().unwrap();
+            //     let a = document
+            //         .create_element("a")
+            //         .unwrap()
+            //         .dyn_into::<web_sys::HtmlAnchorElement>()
+            //         .unwrap();
+            //     a.set_href(&image_string);
+            //     a.set_download("canvas.png");
+            //     // // hide the link
+            //     // a.set_property("display", "none").unwrap();
+            //     // insert into DOM, trigger download, then remove
+            //     let body = document.body().unwrap();
+            //     body.append_child(&a).unwrap();
+            //     a.click();
+            //     body.remove_child(&a).unwrap();
 
-            }>
-                "Save as image"
-            </button>
+            // }>
+            //     "Save as image"
+            // </button>
             <br />
             <button on:click=reconstruct_img_and_set_reconstructed_img>
                 "Reconstruct image"

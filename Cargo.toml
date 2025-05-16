@@ -8,6 +8,7 @@ edition = "2024"
 [dependencies]
 base64 = "0.22.1"
 console_error_panic_hook = "0.1.7"
+getrandom = { version = "0.3.3", features = ["wasm_js"] }
 gloo-events = "0.2.0"
 html = "0.6.3"
 image = "0.25.6"
