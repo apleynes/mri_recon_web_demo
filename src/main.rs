@@ -7,7 +7,7 @@ use ndrustfft::Complex;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{window, Blob, CanvasRenderingContext2d, Element, HtmlCanvasElement, HtmlInputElement, MouseEvent, Url};
-use image::{ImageReader, RgbImage, ImageFormat, GrayImage};
+use image::{imageops::FilterType, GrayImage, ImageFormat, ImageReader, RgbImage};
 use base64::{engine::general_purpose, Engine as _};
 use nshare::{AsNdarray2, AsNdarray3, IntoNdarray3};
 use ndarray::{Array2, Array3, s, azip};
@@ -31,13 +31,20 @@ async fn convert_image_input_to_base_64(input: Option<HtmlInputElement>) -> Resu
     let buffer_vec = uint8_array.to_vec();
 
     // Decode the image
-    let img = image::load_from_memory(&buffer_vec)
+    let mut img = image::load_from_memory(&buffer_vec)
         .map_err(|e| format!("Failed to decode image: {:?}", e))?;
+    // Get the width and height of the image
+    let mut width = img.width();
+    let mut height = img.height();
+
+    // If image is bigger than 512x512, resize it to 512x512
+    if width > 512 || height > 512 {
+        img = img.resize_exact(512, 512, FilterType::CatmullRom);
+        width = 512;
+        height = 512;
+    }
     let img: RgbImage = img.into_rgb8();
 
-    // Get the width and height of the image
-    let width = img.width();
-    let height = img.height();
 
     // Convert original image to base64 for display
     let mut original_buffer = Vec::new();
@@ -70,63 +77,6 @@ fn convert_data_url_to_image(data_url: &str) -> Result<image::DynamicImage, Stri
 
     Ok(img)
 }
-
-
-async fn process_image(input: Option<HtmlInputElement>, tgv_lam: f32) -> Result<(String, String), String> {
-    let input = input.ok_or("No input element found")?;
-    let files = input.files().ok_or("No files selected")?;
-    let file = files.get(0).ok_or("No file found")?;
-
-    // Read file as ArrayBuffer
-    let array_buffer_promise = file.array_buffer();
-    let array_buffer = wasm_bindgen_futures::JsFuture::from(array_buffer_promise)
-        .await
-        .map_err(|e| format!("Failed to read file: {:?}", e))?;
-
-    // Convert to Uint8Array and then to Vec<u8>
-    let uint8_array = js_sys::Uint8Array::new(&array_buffer);
-    let buffer_vec = uint8_array.to_vec();
-
-    // Decode the image
-    let img = image::load_from_memory(&buffer_vec)
-        .map_err(|e| format!("Failed to decode image: {:?}", e))?;
-    let img: RgbImage = img.into_rgb8();
-
-    // Convert original image to base64 for display
-    let mut original_buffer = Vec::new();
-    img.write_to(&mut Cursor::new(&mut original_buffer), ImageFormat::Png)
-        .map_err(|e| format!("Failed to encode original image: {:?}", e))?;
-    let original_base64 = general_purpose::STANDARD.encode(&original_buffer);
-    let original_data_url = format!("data:image/png;base64,{}", original_base64);
-
-    // Process the image with TGV denoising
-    // let rgb_img: RgbImage = img.to_rgb8();
-    let img = img.as_ndarray3();
-    let img = img.permuted_axes([1, 2, 0]);
-    // println!("img shape is {:?}", img.shape());
-    // println!("img min is {:?}", img.into_iter().min());
-    // println!("img max is {:?}", img.into_iter().max());
-    let img: Array3<f32> = img.map(|x| *x as f32);
-    let grayscale_img: Array2<f32> = (&img.slice(s![.., .., 0]) + &img.slice(s![.., .., 1]) + &img.slice(s![.., .., 2])) / 3.0;
-
-    // println!("grayscale_img min is {:?}", (&grayscale_img).into_iter().reduce(|a, b| if a < b { a } else { b }));
-    // println!("grayscale_img max is {:?}", (&grayscale_img).into_iter().reduce(|a, b| if a > b { a } else { b }));
-
-    // let denoised_img = tgv::tgv_denoise(&grayscale_img.view(), tgv_lam, 2.0, 1.0, 0.125, 0.125, 300);
-    // // WebAssembly does not allow for parallelization directly using rayon. Needs special handling
-    // let denoised_img = denoised_img.map(|x| *x as u8);
-    // let denoised_img = GrayImage::from_raw(img.shape()[0] as u32, img.shape()[1] as u32, denoised_img.into_iter().collect()).unwrap();
-
-    // // Convert processed image to base64 for display
-    let mut processed_buffer = Vec::new();
-    GrayImage::from_raw(img.shape()[0] as u32, img.shape()[1] as u32, grayscale_img.into_iter().map(|x| x as u8).collect()).unwrap().write_to(&mut Cursor::new(&mut processed_buffer), ImageFormat::Png)
-        .map_err(|e| format!("Failed to encode processed image: {:?}", e))?;
-    let processed_base64 = general_purpose::STANDARD.encode(&processed_buffer);
-    let processed_data_url = format!("data:image/png;base64,{}", processed_base64);
-
-    Ok((original_data_url, processed_data_url))
-}
-
 
 fn draw_point(ctx: &CanvasRenderingContext2d, x: f64, y: f64, erase: bool, point_size: f64) {
     if erase {
@@ -380,8 +330,17 @@ fn App() -> impl IntoView {
             // Convert to Uint8Array and then to Vec<u8>
             let uint8_array = js_sys::Uint8Array::new(&array_buffer);
             let buffer_vec = uint8_array.to_vec();
-            let img = image::load_from_memory(&buffer_vec)
+            let mut img = image::load_from_memory(&buffer_vec)
                 .map_err(|e| format!("Failed to decode image: {:?}", e)).expect("Failed to decode image");
+
+            // Resize image to 512x512 if it's bigger (redo this. TODO: Refactor)
+            let mut width = img.width();
+            let mut height = img.height();
+            if width > 512 || height > 512 {
+                img = img.resize_exact(512, 512, FilterType::CatmullRom);
+                width = 512;
+                height = 512;
+            }
             let img: GrayImage = img.into_luma8();
             let img = img.as_ndarray2();
             let complex_img: Array2<Complex<f64>> = img.map(|x| Complex::new(*x as f64, 0.0));
