@@ -1,10 +1,11 @@
 use web_time::Instant;
 
 use leptos::logging::log;
-use ndarray::{par_azip, s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, Axis, Zip};
+use ndarray::{azip, par_azip, s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, Axis, Zip};
 use num_complex::{Complex, ComplexFloat};
 use rayon::{array, prelude::*};
 use crate::fft::*;
+use num_cpus;
 
 
 fn roll1d(a: &ArrayView1<f32>, roll_amount: i32) -> Array1<f32> {
@@ -25,32 +26,49 @@ fn roll2d(a: &ArrayView2<f32>, axis: usize, roll_amount: i32) -> Array2<f32> {
 
 fn gradient(u: &ArrayView2<f32>) -> Array3<f32> {
     // let grad_x = roll2d(&u.view(), 1, -1) - u;
+    let num_cpus = num_cpus::get();
+    let (y_size, x_size) = u.dim();
 
+    let chunk_size = y_size / num_cpus;
     let mut grad_x = u.clone().to_owned();
-    grad_x.axis_iter_mut(Axis(0)) 
-        .into_par_iter()
-        .for_each(|mut row| {
-            let owned_row_view = row.view();
-            let shifted_row = roll1d(&owned_row_view, -1);
-            let diff = shifted_row - row.to_owned();
-            // let mut diff = diff.clone();
-            // row = diff.view_mut();
+    grad_x.axis_chunks_iter_mut(Axis(0), chunk_size).par_bridge().for_each( |mut chunk| {
+        chunk.axis_iter_mut(Axis(0)).for_each(|mut row| {
+            let mut diff = row.to_owned();
+            for i in 0..row.len() {
+                if i == (row.len() - 1) {
+                    diff[i] = row[0] - row[i];
+                } else {
+                    diff[i] = row[i + 1] - row[i];
+                }
+            };
             row.assign(&diff);
         });
+    });
     
     // let grad_y = roll2d(&u.view(), 0, -1) - u;
 
+    let chunk_size = x_size / num_cpus;
     let mut grad_y = u.clone().to_owned();
-    grad_y.axis_iter_mut(Axis(1))
-        .into_par_iter()
-        .for_each(|mut col| {
-            let owned_col_view = col.view();
-            let shifted_col = roll1d(&owned_col_view, -1);
-            let diff = shifted_col - col.to_owned();
-            // let mut diff = diff.clone();
-            // col = diff.view_mut();
+    grad_y.axis_chunks_iter_mut(Axis(1), chunk_size).par_bridge().for_each( |mut chunk| {
+        chunk.axis_iter_mut(Axis(1)).for_each(|mut col| {
+            // let owned_col_view = col.view();
+            // let shifted_col = roll1d(&owned_col_view, -1);
+            // let diff = shifted_col - col.to_owned();
+            // // let mut diff = diff.clone();
+            // // col = diff.view_mut();
+            // col.assign(&diff);
+
+            let mut diff = col.to_owned();
+            for i in 0..col.len() {
+                if i == (col.len() - 1) {
+                    diff[i] = col[0] - col[i];
+                } else {
+                    diff[i] = col[i + 1] - col[i];
+                }
+            };
             col.assign(&diff);
         });
+    });
 
     ndarray::stack![Axis(2), grad_x, grad_y]
 }
