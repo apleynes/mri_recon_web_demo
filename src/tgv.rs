@@ -138,61 +138,78 @@ fn divergence(p: &ArrayView3<f32>) -> Array2<f32> {
 }
 
 fn sym_gradient(w: &ArrayView3<f32>) -> Array3<f32> {
-    // // First diagonal: ∂x w_0
-    // let first_diagonal = roll2d(&w.slice(s![.., .., 0]), 1, -1) 
-    //     - w.slice(s![.., .., 0]);
-    // // Second diagonal: ∂y w_1
-    // let second_diagonal = roll2d(&w.slice(s![.., .., 1]), 0, -1) 
-    //     - w.slice(s![.., .., 1]);
-    // // Off-diagonals: 0.5*(∂y w_0 + ∂x w_1)
-    // let tmp1 = roll2d(&w.slice(s![.., .., 0]), 0, -1) 
-    //     - w.slice(s![.., .., 0]);
-    // let tmp2 = roll2d(&w.slice(s![.., .., 1]), 1, -1) 
-    //     - w.slice(s![.., .., 1]);
-    // let off_diagonals = 0.5 * (tmp1 + tmp2);
+    let num_cpus = num_cpus::get();
+    let (y_size, x_size, _) = w.dim();
 
-    // Calculate first diagonal in parallel
+    // Calculate first diagonal: ∂x w_0 (shift right, forward difference)
+    let chunk_size = y_size / num_cpus;
     let mut first_diagonal = w.slice(s![.., .., 0]).clone().to_owned();
-    first_diagonal.axis_iter_mut(Axis(0))
-        .into_par_iter()
-        .for_each(|mut row| {
-            let owned_row_view = row.view();
-            let shifted_row = roll1d(&owned_row_view, -1);
-            let diff = shifted_row - row.to_owned();
+    first_diagonal.axis_chunks_iter_mut(Axis(0), chunk_size).par_bridge().for_each(|mut chunk| {
+        chunk.axis_iter_mut(Axis(0)).for_each(|mut row| {
+            let mut diff = row.to_owned();
+            for i in 0..row.len() {
+                if i == (row.len() - 1) {
+                    diff[i] = row[0 as usize] - row[i];
+                } else {
+                    diff[i] = row[i + 1] - row[i];
+                }
+            };
             row.assign(&diff);
         });
+    });
 
-    // Calculate second diagonal in parallel
+    // Calculate second diagonal: ∂y w_1 (shift down, forward difference)
+    let chunk_size = x_size / num_cpus;
     let mut second_diagonal = w.slice(s![.., .., 1]).clone().to_owned();
-    second_diagonal.axis_iter_mut(Axis(1))
-        .into_par_iter()
-        .for_each(|mut col| {
-            let owned_col_view = col.view();
-            let shifted_col = roll1d(&owned_col_view, -1);
-            let diff = shifted_col - col.to_owned();
+    second_diagonal.axis_chunks_iter_mut(Axis(1), chunk_size).par_bridge().for_each(|mut chunk| {
+        chunk.axis_iter_mut(Axis(1)).for_each(|mut col| {
+            let mut diff = col.to_owned();
+            for i in 0..col.len() {
+                if i == (col.len() - 1) {
+                    diff[i] = col[0 as usize] - col[i];
+                } else {
+                    diff[i] = col[i + 1] - col[i];
+                }
+            };
             col.assign(&diff);
         });
+    });
 
-    // Calculate off-diagonals in parallel
+    // Calculate off-diagonals: 0.5*(∂y w_0 + ∂x w_1)
+    // tmp1: ∂y w_0 (shift down, forward difference)
+    let chunk_size = x_size / num_cpus;
     let mut tmp1 = w.slice(s![.., .., 0]).clone().to_owned();
-    tmp1.axis_iter_mut(Axis(1))
-        .into_par_iter()
-        .for_each(|mut row| {
-            let owned_row_view = row.view();
-            let shifted_row = roll1d(&owned_row_view, -1);
-            let diff = shifted_row - row.to_owned();
+    tmp1.axis_chunks_iter_mut(Axis(1), chunk_size).par_bridge().for_each(|mut chunk| {
+        chunk.axis_iter_mut(Axis(1)).for_each(|mut col| {
+            let mut diff = col.to_owned();
+            for i in 0..col.len() {
+                if i == (col.len() - 1) {
+                    diff[i] = col[0 as usize] - col[i];
+                } else {
+                    diff[i] = col[i + 1] - col[i];
+                }
+            };
+            col.assign(&diff);
+        });
+    });
+
+    // tmp2: ∂x w_1 (shift right, forward difference)
+    let chunk_size = y_size / num_cpus;
+    let mut tmp2 = w.slice(s![.., .., 1]).clone().to_owned();
+    tmp2.axis_chunks_iter_mut(Axis(0), chunk_size).par_bridge().for_each(|mut chunk| {
+        chunk.axis_iter_mut(Axis(0)).for_each(|mut row| {
+            let mut diff = row.to_owned();
+            for i in 0..row.len() {
+                if i == (row.len() - 1) {
+                    diff[i] = row[0 as usize] - row[i];
+                } else {
+                    diff[i] = row[i + 1] - row[i];
+                }
+            };
             row.assign(&diff);
         });
+    });
 
-    let mut tmp2 = w.slice(s![.., .., 1]).clone().to_owned();
-    tmp2.axis_iter_mut(Axis(0))
-        .into_par_iter()
-        .for_each(|mut col| {
-            let owned_col_view = col.view();
-            let shifted_col = roll1d(&owned_col_view, -1);
-            let diff = shifted_col - col.to_owned();
-            col.assign(&diff);
-        });
     let mut off_diagonals = tmp1;
     par_azip!((x in &mut off_diagonals, &y in &tmp2) {
         *x = 0.5 * (*x + y);
@@ -202,60 +219,81 @@ fn sym_gradient(w: &ArrayView3<f32>) -> Array3<f32> {
 }
 
 fn sym_divergence(q: &ArrayView3<f32>) -> Array3<f32> {
-    // // First component: ∂x q_0 - ∂y q_2
-    // let first_term = -(q.slice(s![.., .., 0]).to_owned() 
-    //     - roll2d(&q.slice(s![.., .., 0]), 1, 1));
-    // let second_term = -0.5 * (q.slice(s![.., .., 2]).to_owned() 
-    //     - roll2d(&q.slice(s![.., .., 2]), 0, 1));
-    // let first_component = first_term + second_term;
-    // // Second component: ∂y q_1 - ∂x q_2
-    // let first_term = -(q.slice(s![.., .., 1]).to_owned() 
-    //     - roll2d(&q.slice(s![.., .., 1]), 0, 1));
-    // let second_term = -0.5 * (q.slice(s![.., .., 2]).to_owned() 
-    //     - roll2d(&q.slice(s![.., .., 2]), 1, 1));
-    // let second_component = first_term + second_term;
+    let num_cpus = num_cpus::get();
+    let (y_size, x_size, _) = q.dim();
 
-
+    // First component: ∂x q_0 - ∂y q_2
+    // ∂x q_0: backward difference (shift left)
+    let chunk_size = y_size / num_cpus;
     let mut first_component = q.slice(s![.., .., 0]).clone().to_owned();
-    first_component.axis_iter_mut(Axis(0))
-        .into_par_iter()
-        .for_each(|mut row| {
-            let owned_row_view = row.view();
-            let shifted_row = roll1d(&owned_row_view, 1);
-            let diff = -(row.to_owned() - shifted_row);
-            row.assign(&diff);
+    first_component.axis_chunks_iter_mut(Axis(0), chunk_size).par_bridge().for_each(|mut chunk| {
+        chunk.axis_iter_mut(Axis(0)).for_each(|mut row| {
+            let mut diff = row.to_owned();
+            for i in 0..row.len() {
+                if i == 0 {
+                    diff[i] = row[i] - row[row.len() - 1];
+                } else {
+                    diff[i] = row[i] - row[i - 1];
+                }
+            };
+            row.assign(&diff.map(|x| -x));
         });
+    });
+
+    // ∂y q_2: backward difference (shift up)
+    let chunk_size = x_size / num_cpus;
     let mut second_term = q.slice(s![.., .., 2]).clone().to_owned();
-    second_term.axis_iter_mut(Axis(1))
-        .into_par_iter()
-        .for_each(|mut col| {
-            let owned_col_view = col.view();
-            let shifted_col = roll1d(&owned_col_view, 1);
-            let diff = -0.5 * (col.to_owned() - shifted_col);
-            col.assign(&diff);
+    second_term.axis_chunks_iter_mut(Axis(1), chunk_size).par_bridge().for_each(|mut chunk| {
+        chunk.axis_iter_mut(Axis(1)).for_each(|mut col| {
+            let mut diff = col.to_owned();
+            for i in 0..col.len() {
+                if i == 0 {
+                    diff[i] = col[i] - col[col.len() - 1];
+                } else {
+                    diff[i] = col[i] - col[i - 1];
+                }
+            };
+            col.assign(&diff.map(|x| -0.5 * x));
         });
+    });
     par_azip!((x in &mut first_component, &y in &second_term) {
         *x += y;
     });
 
+    // Second component: ∂y q_1 - ∂x q_2
+    // ∂y q_1: backward difference (shift up)
+    let chunk_size = x_size / num_cpus;
     let mut second_component = q.slice(s![.., .., 1]).clone().to_owned();
-    second_component.axis_iter_mut(Axis(1))
-        .into_par_iter()
-        .for_each(|mut col| {
-            let owned_col_view = col.view();
-            let shifted_col = roll1d(&owned_col_view, 1);
-            let diff = -(col.to_owned() - shifted_col);
-            col.assign(&diff);
+    second_component.axis_chunks_iter_mut(Axis(1), chunk_size).par_bridge().for_each(|mut chunk| {
+        chunk.axis_iter_mut(Axis(1)).for_each(|mut col| {
+            let mut diff = col.to_owned();
+            for i in 0..col.len() {
+                if i == 0 {
+                    diff[i] = col[i] - col[col.len() - 1];
+                } else {
+                    diff[i] = col[i] - col[i - 1];
+                }
+            };
+            col.assign(&diff.map(|x| -x));
         });
+    });
+
+    // ∂x q_2: backward difference (shift left)
+    let chunk_size = y_size / num_cpus;
     let mut second_term = q.slice(s![.., .., 2]).clone().to_owned();
-    second_term.axis_iter_mut(Axis(0))
-        .into_par_iter()
-        .for_each(|mut row| {
-            let owned_row_view = row.view();
-            let shifted_row = roll1d(&owned_row_view, 1);
-            let diff = -0.5 * (row.to_owned() - shifted_row);
-            row.assign(&diff);
+    second_term.axis_chunks_iter_mut(Axis(0), chunk_size).par_bridge().for_each(|mut chunk| {
+        chunk.axis_iter_mut(Axis(0)).for_each(|mut row| {
+            let mut diff = row.to_owned();
+            for i in 0..row.len() {
+                if i == 0 {
+                    diff[i] = row[i] - row[row.len() - 1];
+                } else {
+                    diff[i] = row[i] - row[i - 1];
+                }
+            };
+            row.assign(&diff.map(|x| -0.5 * x));
         });
+    });
     par_azip!((x in &mut second_component, &y in &second_term) {
         *x += y;
     });
