@@ -450,13 +450,15 @@ pub fn tgv_mri_reconstruction(
     let mut w_bar = w.clone();
 
     let t: f32 = 1.0;  // Adaptive momentum
+
+    let num_cpus = num_cpus::get();
+    let (y_size, _, _) = p.dim();
+    let chunk_size = y_size / num_cpus;
     for i in 0..max_iter {
         let grad_u_bar = gradient(&u_bar.view());
         
         // Replace par_azip with chunked parallelization
-        let num_cpus = num_cpus::get();
-        let (y_size, _, _) = p.dim();
-        let chunk_size = y_size / num_cpus;
+
         let mut p_chunks = p.axis_chunks_iter_mut(Axis(0), chunk_size).into_iter();
         let grad_chunks = grad_u_bar.axis_chunks_iter(Axis(0), chunk_size).into_iter();
         let w_bar_chunks = w_bar.axis_chunks_iter(Axis(0), chunk_size).into_iter();
@@ -495,14 +497,22 @@ pub fn tgv_mri_reconstruction(
         let complex_u = Array2::<Complex<f64>>::from_shape_vec((ny, nx), (&u).into_iter().map(|x| Complex::new(*x as f64, 0.0)).collect()).unwrap();
         let fft_u = fft2shift(&fft2(&complex_u.view()).view());
         let mut residual = Array2::<Complex<f64>>::zeros((ny, nx));
-        par_azip!((x in &mut residual, &y in &fft_u, &z in centered_kspace, &w in centered_mask) {
-            if w > 0. {
-                *x = y - z;
+        
+        // Replace par_azip with chunked parallelization
+        let mut residual_chunks = residual.axis_chunks_iter_mut(Axis(0), chunk_size).into_iter();
+        let fft_u_chunks = fft_u.axis_chunks_iter(Axis(0), chunk_size).into_iter();
+        let centered_kspace_chunks = centered_kspace.axis_chunks_iter(Axis(0), chunk_size).into_iter();
+        let centered_mask_chunks = centered_mask.axis_chunks_iter(Axis(0), chunk_size).into_iter();
+        residual_chunks.zip(fft_u_chunks.zip(centered_kspace_chunks.zip(centered_mask_chunks))).par_bridge().for_each(|(mut x, (y, (z, w)))| {
+            for ((x_elem, y_elem), (z_elem, w_elem)) in x.iter_mut().zip(y.iter()).zip(z.iter().zip(w.iter())) {
+                if *w_elem > 0. {
+                    *x_elem = *y_elem - *z_elem;
+                }
             }
         });
+        
         let ifft_residual = ifft2(&ifft2shift(&residual.view()).view());
         let ifft_residual = Array2::<f32>::from_shape_vec((ny, nx), ifft_residual.into_iter().map(|x| x.re as f32).collect()).unwrap();
-        
         // Replace par_azip with chunked parallelization for final u update
         let mut u_chunks = u.axis_chunks_iter_mut(Axis(0), chunk_size).into_iter();
         let ifft_residual_chunks = ifft_residual.axis_chunks_iter(Axis(0), chunk_size).into_iter();
