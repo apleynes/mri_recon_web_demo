@@ -78,35 +78,60 @@ fn divergence(p: &ArrayView3<f32>) -> Array2<f32> {
     //     - roll2d(&p.slice(s![.., .., 0]), 1, 1);
 
     // Calculate first term in parallel
+    let num_cpus = num_cpus::get();
+    let (y_size, x_size, _) = p.dim();
+    let chunk_size = y_size / num_cpus;
     let mut first_term = p.slice(s![.., .., 0]).clone().to_owned();
-    first_term.axis_iter_mut(Axis(0))
-        .into_par_iter()
-        .for_each(|mut row| {
-            let owned_row_view = row.view();
-            let shifted_row = roll1d(&owned_row_view, 1);
-            let diff = row.to_owned() - shifted_row;
+    first_term.axis_chunks_iter_mut(Axis(0), chunk_size).par_bridge().for_each( |mut chunk| {
+        chunk.axis_iter_mut(Axis(0)).for_each(|mut row| {
+            // let owned_row_view = row.view();
+            // let shifted_row = roll1d(&owned_row_view, 1);
+            // let diff = row.to_owned() - shifted_row;
+            let mut diff = row.to_owned();
+            for i in 0..row.len() {
+                if i == 0 {
+                    diff[i] = row[i] - row[row.len() - 1];
+                } else {
+                    diff[i] = row[i] - row[i - 1];
+                }
+            };
             row.assign(&diff);
         });
-
+    });
 
     // let second_term = p.slice(s![.., .., 1]).to_owned() 
     // - roll2d(&p.slice(s![.., .., 1]), 0, 1);
 
     // Calculate second term in parallel
+    let chunk_size = x_size / num_cpus;
     let mut second_term = p.slice(s![.., .., 1]).clone().to_owned();
-    second_term.axis_iter_mut(Axis(1))
-        .into_par_iter()
-        .for_each(|mut col| {
-            let owned_col_view = col.view();
-            let shifted_col = roll1d(&owned_col_view, 1);
-            let diff = col.to_owned() - shifted_col;
+    second_term.axis_chunks_iter_mut(Axis(1), chunk_size).par_bridge().for_each( |mut chunk| {
+        chunk.axis_iter_mut(Axis(1)).for_each(|mut col| {
+            // let owned_col_view = col.view();
+            // let shifted_col = roll1d(&owned_col_view, 1);
+            // let diff = col.to_owned() - shifted_col;
+            let mut diff = col.to_owned();
+            for i in 0..col.len() {
+                if i == 0 {
+                    diff[i] = col[i] - col[col.len() - 1];
+                } else {
+                    diff[i] = col[i] - col[i - 1];
+                }
+            };
             col.assign(&diff);
         });
-
+    });
     // -(first_term + second_term)
     // Calculate output
-    par_azip!((x in &mut first_term, &y in &second_term) {
-        *x = -(*x + y);
+    // par_azip!((x in &mut first_term, &y in &second_term) {
+    //     *x = -(*x + y);
+    // });
+    let chunk_size = y_size / num_cpus;
+    let mut first_term_chunks = first_term.axis_chunks_iter_mut(Axis(0), chunk_size).into_iter();
+    let second_term_chunks = second_term.axis_chunks_iter(Axis(0), chunk_size).into_iter();
+    first_term_chunks.zip(second_term_chunks).par_bridge().for_each(|(mut x, y)| {
+        // x = -(x + y);
+        x.assign(&(-(x.to_owned() + y)));
     });
     first_term
 
